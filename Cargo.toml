@@ -1,0 +1,18 @@
+# [[file:shen-rust.org::*Package%20Details][Package\ Details:1]]
+[package]
+name = "shen-rust"
+version = "0.0.1"
+authors = ["aditya.siram@gmail.com"]
+description = "An implementation of Shen in Rust"
+repository = "https://github.com/deech/shen-rust"
+license = "MIT"
+
+[dependencies]
+libc = "*"
+nom = "^1.2.4"
+ref_eq = "^1.0.0"
+syntex = { version = "^0.42.2" }
+syntex_syntax = { version = "^0.42.0" }
+aster = { version = "^0.25.0", features = ["with-syntex"] }
+quasi = { version = "^0.18.0", features = ["with-syntex"] }
+# Package\ Details:1 ends here
