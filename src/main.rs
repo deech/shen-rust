@@ -265,7 +265,7 @@ pub fn get_element_at (path : Vec<usize>, sexp: &KlToken)  -> Option<&KlToken> {
 }
 // Getter:1 ends here
 
-// [[file:../shen-rust.org::*Detect%20Recursive%20Calls][Detect\ Recursive\ Calls:1]]
+// [[file:../shen-rust.org::*Detect%20Possible%20Recursive%20Calls][Detect\ Possible\ Recursive\ Calls:1]]
 pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlToken) -> Vec<Vec<usize>> {
     let mut found : Vec< Vec<usize> >= Vec::new();
     if let &KlToken::Sexp(_) = sexp {
@@ -324,13 +324,62 @@ pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlTo
     }
     found
 }
-// Detect\ Recursive\ Calls:1 ends here
+// Detect\ Possible\ Recursive\ Calls:1 ends here
 
 // [[file:../shen-rust.org::*Detect%20Function%20Application%20Context][Detect\ Function\ Application\ Context:1]]
-// pub fn start_of_function_chain (tail_call_path: &Vec<usize>, sexp: &KlToken) -> Vec<usize> {
-//
-// }
+pub fn start_of_function_chain (tail_call_path: Vec<usize>, sexp: &KlToken) -> Option<Vec<usize>> {
+    let mut result = None;
+    let mut i = 0;
+    while i < tail_call_path.len() {
+        let current_path : Vec<usize> = tail_call_path.iter().cloned().take(i).collect();
+        match get_element_at(current_path.clone(), &sexp) {
+            Some(current_element) => {
+                if let &KlToken::Sexp(ref current) = current_element {
+                    match current.as_slice() {
+                        &[KlToken::Symbol(ref s), _] => {
+                            match s.as_str() {
+                                "if" | "defun" | "let" | "lambda" | "do" => result = None,
+                                _ => result = Some(current_path.clone()),
+                            }
+                        }
+                        _ => ()
+                    }
+                }
+            },
+            _ => return None
+        }
+        i = i + 1;
+    }
+    result
+}
 // Detect\ Function\ Application\ Context:1 ends here
+
+// [[file:../shen-rust.org::*Get%20Tail%20Calls][Get\ Tail\ Calls:1]]
+pub fn get_all_tail_calls (sexp: &KlToken) -> Vec<Vec<usize>> {
+    if let &KlToken::Sexp(ref defun) = sexp {
+        match defun.as_slice() {
+            &[KlToken::Symbol(ref defun), KlToken::Symbol(ref name), KlToken::Sexp(ref args), _]
+                if defun.as_str() == "defun" => {
+                    let mut recursive_calls = find_recursive_calls(name.clone(), args.len(), sexp);
+                    recursive_calls.retain(
+                        |ref path| {
+                            let context = start_of_function_chain(path.iter().cloned().collect(), sexp);
+                            match context {
+                                Some(_) => false,
+                                None => true
+                            }
+                        }
+                    );
+                    recursive_calls
+                },
+            _ => Vec::new()
+        }
+    }
+    else {
+        Vec::new()
+    }
+}
+// Get\ Tail\ Calls:1 ends here
 
 // [[file:../shen-rust.org::*KLambda%20Files][KLambda\ Files:1]]
 const KLAMBDAFILES: &'static [ &'static str ] = &[
