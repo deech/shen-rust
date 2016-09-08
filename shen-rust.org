@@ -26,6 +26,7 @@
 * Preamble
   #+BEGIN_SRC rust :tangle src/main.rs
     #![feature(slice_patterns)]
+    #![feature(custom_derive)]
     #[macro_use]
     extern crate nom;
     use std::str;
@@ -33,6 +34,7 @@
     use std::path::Path;
     use std::fs::File;
     use std::io::prelude::*;
+    use std::rc::Rc;
   #+END_SRC
 * Types
 ** Token Types
@@ -49,6 +51,29 @@
     pub enum KlNumber {
         Float(f64),
         Int(i64),
+    }
+
+    #[derive(Display,Debug)]
+    pub enum KlCons {
+        Cons(Box<KlElement> , Box<KlCons>),
+        Nil
+    }
+
+    #[derive(Display,Debug)]
+    pub enum KlElement {
+        Symbol(String),
+        Number(KlNumber),
+        String(String),
+        Cons(KlCons),
+        Vector(Vec<KlElement>)
+    }
+
+    #[derive(Debug)]
+    pub struct KlError { cause : String }
+
+    pub enum KlFunctionCall {
+        FeedMe(Rc<Fn(Rc<KlElement>) -> KlFunctionCall>),
+        Done(Result<Rc<KlElement>,Rc<String>>)
     }
   #+END_SRC
 * Parsing
@@ -372,8 +397,19 @@
                       match current.as_slice() {
                           &[KlToken::Symbol(ref s), _] => {
                               match s.as_str() {
-                                  "if" | "defun" | "let" | "lambda" | "do" => result = None,
-                                  _ => result = Some(current_path.clone()),
+                                  "if" | "defun" | "let" | "lambda" | "do" => {
+                                      result = None;
+                                      i = i + 1;
+                                  }
+                                  "cond" => {
+                                      result = None;
+                                      i = i + 2;
+                                  }
+                                  _ => {
+                                      result = Some(current_path.clone());
+                                      i = i + 1
+                                  }
+
                               }
                           }
                           _ => ()
@@ -382,7 +418,6 @@
               },
               _ => return None
           }
-          i = i + 1;
       }
       result
   }
@@ -412,6 +447,39 @@
       else {
           Vec::new()
       }
+  }
+#+END_SRC
+* Primitives
+#+BEGIN_SRC rust :tangle src/main.rs
+  pub fn shen_if () -> KlFunctionCall {
+      KlFunctionCall::FeedMe(
+          Rc::new(
+              move | predicate_ref | {
+                  KlFunctionCall::FeedMe(
+                      Rc::new(
+                          move | if_true_ref | {
+                              let predicate_ref = predicate_ref.clone();
+                              KlFunctionCall::FeedMe(
+                                  Rc::new(
+                                      move | if_false_ref | {
+                                          match *predicate_ref {
+                                              KlElement::Symbol(ref s) if s.as_str() == "true" => {
+                                                  KlFunctionCall::Done(Ok(if_true_ref.clone()))
+                                              },
+                                              KlElement::Symbol(ref s) if s.as_str() == "false" => {
+                                                  KlFunctionCall::Done(Ok(if_false_ref.clone()))
+                                              },
+                                              _ => KlFunctionCall::Done(Err(Rc::new(String::from("Expected true or false"))))
+                                          }
+                                      }
+                                  )
+                              )
+                          }
+                      )
+                  )
+              }
+          )
+      )
   }
 #+END_SRC
 * Bootstrap

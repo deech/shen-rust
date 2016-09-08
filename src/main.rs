@@ -1,5 +1,6 @@
 // [[file:../shen-rust.org::*Preamble][Preamble:1]]
 #![feature(slice_patterns)]
+#![feature(custom_derive)]
 #[macro_use]
 extern crate nom;
 use std::str;
@@ -7,6 +8,7 @@ use nom::*;
 use std::path::Path;
 use std::fs::File;
 use std::io::prelude::*;
+use std::rc::Rc;
 // Preamble:1 ends here
 
 // [[file:../shen-rust.org::*Token%20Types][Token\ Types:1]]
@@ -22,6 +24,29 @@ pub enum KlToken {
 pub enum KlNumber {
     Float(f64),
     Int(i64),
+}
+
+#[derive(Display,Debug)]
+pub enum KlCons {
+    Cons(Box<KlElement> , Box<KlCons>),
+    Nil
+}
+
+#[derive(Display,Debug)]
+pub enum KlElement {
+    Symbol(String),
+    Number(KlNumber),
+    String(String),
+    Cons(KlCons),
+    Vector(Vec<KlElement>)
+}
+
+#[derive(Debug)]
+pub struct KlError { cause : String }
+
+pub enum KlFunctionCall {
+    FeedMe(Rc<Fn(Rc<KlElement>) -> KlFunctionCall>),
+    Done(Result<Rc<KlElement>,Rc<String>>)
 }
 // Token\ Types:1 ends here
 
@@ -338,8 +363,19 @@ pub fn start_of_function_chain (tail_call_path: Vec<usize>, sexp: &KlToken) -> O
                     match current.as_slice() {
                         &[KlToken::Symbol(ref s), _] => {
                             match s.as_str() {
-                                "if" | "defun" | "let" | "lambda" | "do" => result = None,
-                                _ => result = Some(current_path.clone()),
+                                "if" | "defun" | "let" | "lambda" | "do" => {
+                                    result = None;
+                                    i = i + 1;
+                                }
+                                "cond" => {
+                                    result = None;
+                                    i = i + 2;
+                                }
+                                _ => {
+                                    result = Some(current_path.clone());
+                                    i = i + 1
+                                }
+
                             }
                         }
                         _ => ()
@@ -348,7 +384,6 @@ pub fn start_of_function_chain (tail_call_path: Vec<usize>, sexp: &KlToken) -> O
             },
             _ => return None
         }
-        i = i + 1;
     }
     result
 }
@@ -380,6 +415,39 @@ pub fn get_all_tail_calls (sexp: &KlToken) -> Vec<Vec<usize>> {
     }
 }
 // Get\ Tail\ Calls:1 ends here
+
+// [[file:../shen-rust.org::*Primitives][Primitives:1]]
+pub fn shen_if () -> KlFunctionCall {
+    KlFunctionCall::FeedMe(
+        Rc::new(
+            move | predicate_ref | {
+                KlFunctionCall::FeedMe(
+                    Rc::new(
+                        move | if_true_ref | {
+                            let predicate_ref = predicate_ref.clone();
+                            KlFunctionCall::FeedMe(
+                                Rc::new(
+                                    move | if_false_ref | {
+                                        match *predicate_ref {
+                                            KlElement::Symbol(ref s) if s.as_str() == "true" => {
+                                                KlFunctionCall::Done(Ok(if_true_ref.clone()))
+                                            },
+                                            KlElement::Symbol(ref s) if s.as_str() == "false" => {
+                                                KlFunctionCall::Done(Ok(if_false_ref.clone()))
+                                            },
+                                            _ => KlFunctionCall::Done(Err(Rc::new(String::from("Expected true or false"))))
+                                        }
+                                    }
+                                )
+                            )
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
+// Primitives:1 ends here
 
 // [[file:../shen-rust.org::*KLambda%20Files][KLambda\ Files:1]]
 const KLAMBDAFILES: &'static [ &'static str ] = &[
