@@ -53,26 +53,26 @@
         Int(i64),
     }
 
-    #[derive(Display,Debug)]
     pub enum KlCons {
         Cons(Box<KlElement> , Box<KlCons>),
         Nil
     }
 
-    #[derive(Display,Debug)]
     pub enum KlElement {
         Symbol(String),
         Number(KlNumber),
         String(String),
         Cons(KlCons),
+        Closure(KlClosure),
         Vector(Vec<KlElement>)
     }
 
     #[derive(Debug)]
     pub struct KlError { cause : String }
 
-    pub enum KlFunctionCall {
-        FeedMe(Rc<Fn(Rc<KlElement>) -> KlFunctionCall>),
+    pub enum KlClosure {
+        FeedMe(Rc<Fn(Rc<KlElement>) -> KlClosure>),
+        Thunk(Rc<Fn() -> Rc<KlElement>>),
         Done(Result<Rc<KlElement>,Rc<String>>)
     }
   #+END_SRC
@@ -450,26 +450,94 @@
   }
 #+END_SRC
 * Primitives
+** Conditionals
+*** Helpers
 #+BEGIN_SRC rust :tangle src/main.rs
-  pub fn shen_if () -> KlFunctionCall {
-      KlFunctionCall::FeedMe(
+  pub fn shen_cons_to_vec (cons_cells: &KlCons) -> Vec<&KlElement> {
+      let mut result : Vec<&KlElement> = Vec::new();
+      let mut so_far = cons_cells;
+      loop {
+          match so_far {
+              &KlCons::Cons(ref car, ref cdr) => {
+                  result.push(&**car);
+                  so_far = cdr;
+              },
+              &KlCons::Nil => return result,
+          }
+      }
+  }
+
+  pub fn shen_is_bool (a: &KlElement) -> bool {
+      match a {
+          &KlElement::Symbol(ref s) if s.as_str() == "true" || s.as_str() == "false" => true,
+          _ => false
+      }
+  }
+
+  pub fn shen_is_thunk(a: &KlElement) -> bool {
+      match a {
+          &KlElement::Closure(KlClosure::Thunk(_)) => true,
+          _ => false
+      }
+  }
+
+  pub fn shen_extract_from_thunk(a : &KlElement) -> Option<&Rc<Fn() -> Rc<KlElement>>> {
+      match a {
+          &KlElement::Closure(KlClosure::Thunk(ref inner)) => Some(inner),
+          _ => None
+      }
+  }
+
+  pub fn shen_make_error(s : &str) -> Result<Rc<KlElement>, Rc<String>> {
+      Err(Rc::new(String::from(s)))
+  }
+#+END_SRC
+*** If
+#+BEGIN_SRC rust :tangle src/main.rs
+  pub fn shen_if () -> KlClosure {
+      KlClosure::FeedMe(
           Rc::new(
-              move | predicate_ref | {
-                  KlFunctionCall::FeedMe(
+              | predicate | {
+                  KlClosure::FeedMe(
                       Rc::new(
-                          move | if_true_ref | {
-                              let predicate_ref = predicate_ref.clone();
-                              KlFunctionCall::FeedMe(
+                          move | if_thunk | {
+                              let predicate = predicate.clone();
+                              KlClosure::FeedMe(
                                   Rc::new(
-                                      move | if_false_ref | {
-                                          match *predicate_ref {
-                                              KlElement::Symbol(ref s) if s.as_str() == "true" => {
-                                                  KlFunctionCall::Done(Ok(if_true_ref.clone()))
-                                              },
-                                              KlElement::Symbol(ref s) if s.as_str() == "false" => {
-                                                  KlFunctionCall::Done(Ok(if_false_ref.clone()))
-                                              },
-                                              _ => KlFunctionCall::Done(Err(Rc::new(String::from("Expected true or false"))))
+                                      move | else_thunk | {
+                                          if !shen_is_bool(&*predicate) {
+                                              KlClosure::Done(shen_make_error("shen_if: the predicate must be 'true' or 'false'."))
+                                          }
+                                          else {
+                                              let extracted = shen_extract_from_thunk(&*if_thunk).and_then(
+                                                  | if_branch | {
+                                                      shen_extract_from_thunk(&*else_thunk).and_then(
+                                                          move | else_branch | {
+                                                              Some((if_branch,else_branch))
+                                                          }
+                                                      )
+                                                  }
+                                              );
+                                              if !extracted.is_some() {
+                                                  KlClosure::Done(shen_make_error("shen_if: Both the if and else branch must be thunks."))
+                                              }
+                                              else {
+                                                  match extracted.unwrap() {
+                                                      (if_branch, else_branch) => {
+                                                          match *predicate {
+                                                              KlElement::Symbol(ref s) if s.as_str() == "true" => {
+                                                                  let forced = if_branch();
+                                                                  KlClosure::Done(Ok(forced))
+                                                              },
+                                                              KlElement::Symbol(ref s) if s.as_str() == "false" => {
+                                                                  let forced = else_branch();
+                                                                  KlClosure::Done(Ok(forced))
+                                                              },
+                                                              _ => KlClosure::Done(Err(Rc::new(String::from("Expecting predicate to be 'true' or 'false'."))))
+                                                          }
+                                                      }
+                                                  }
+                                              }
                                           }
                                       }
                                   )
@@ -477,6 +545,185 @@
                           }
                       )
                   )
+              }
+          )
+      )
+  }
+#+END_SRC
+*** And
+#+BEGIN_SRC rust :tangle src/main.rs
+  pub fn shen_and () -> KlClosure {
+      KlClosure::FeedMe(
+          Rc::new(
+              | a_thunk | {
+                  KlClosure::FeedMe(
+                      Rc::new(
+                          move | b_thunk | {
+                              let extracted = shen_extract_from_thunk(&*a_thunk).and_then(
+                                  | a | {
+                                      shen_extract_from_thunk(&*b_thunk).and_then(
+                                          move | b | {
+                                              Some((a,b))
+                                          }
+                                      )
+                                  }
+                              );
+                              if !extracted.is_some() {
+                                  KlClosure::Done(shen_make_error("shen_and: Both arguments must be thunks."))
+                              }
+                              else {
+                                  match extracted.unwrap() {
+                                      (a,b) => {
+                                          let forced = a();
+                                          if !shen_is_bool(&forced) {
+                                              KlClosure::Done(shen_make_error("shen_and: The first argument must evaluate to the symbol 'true' or 'false."))
+                                          }
+                                          else {
+                                              match &*forced {
+                                                  &KlElement::Symbol(ref a)
+                                                      if a.as_str() == "false" =>
+                                                      KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("false"))))),
+                                                  _ => {
+                                                      let forced = b();
+                                                      if !shen_is_bool(&forced) {
+                                                          KlClosure::Done(shen_make_error("shen_and: The second argument must evaluate to the symbol 'true' or 'false."))
+                                                      }
+                                                      else {
+                                                          match &*forced {
+                                                              &KlElement::Symbol(ref b)
+                                                                  if b.as_str() == "false" =>
+                                                                  KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("false"))))),
+                                                              _ => KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("true")))))
+                                                          }
+                                                      }
+                                                  }
+                                              }
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      )
+                  )
+              }
+          )
+      )
+  }
+#+END_SRC
+*** Or
+#+BEGIN_SRC rust :tangle src/main.rs
+  pub fn shen_or () -> KlClosure {
+      KlClosure::FeedMe(
+          Rc::new(
+              | a_thunk | {
+                  KlClosure::FeedMe(
+                      Rc::new(
+                          move | b_thunk | {
+                              let extracted = shen_extract_from_thunk(&*a_thunk).and_then(
+                                  | a | {
+                                      shen_extract_from_thunk(&*b_thunk).and_then(
+                                          move | b | {
+                                              Some((a,b))
+                                          }
+                                      )
+                                  }
+                              );
+                              if !extracted.is_some() {
+                                  KlClosure::Done(shen_make_error("shen_or: Both arguments must be thunks."))
+                              }
+                              else {
+                                  match extracted.unwrap() {
+                                      (a,b) => {
+                                          let forced = a();
+                                          if !shen_is_bool(&forced) {
+                                              KlClosure::Done(shen_make_error("shen_or: The first argument must evaluate to the symbol 'true' or 'false."))
+                                          }
+                                          else {
+                                              match &*forced {
+                                                  &KlElement::Symbol(ref a)
+                                                      if a.as_str() == "true" =>
+                                                      KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("true"))))),
+                                                  _ => {
+                                                      let forced = b();
+                                                      if !shen_is_bool(&forced) {
+                                                          KlClosure::Done(shen_make_error("shen_or: The second argument must evaluate to the symbol 'true' or 'false."))
+                                                      }
+                                                      else {
+                                                          match &*forced {
+                                                              &KlElement::Symbol(ref b)
+                                                                  if b.as_str() == "true" =>
+                                                                  KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("true"))))),
+                                                              _ => KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("false")))))
+                                                          }
+                                                      }
+                                                  }
+                                              }
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      )
+                  )
+              }
+          )
+      )
+  }
+#+END_SRC
+*** Cond
+#+BEGIN_SRC rust :tangle src/main.rs
+  pub fn shen_cond() -> KlClosure {
+      KlClosure::FeedMe(
+          Rc::new(
+              | cases | {
+                  match *cases {
+                      KlElement::Cons(ref cases) => {
+                          let cases_vec = shen_cons_to_vec(cases);
+                          let mut pairs : Vec<(&KlElement,&KlElement)>= Vec::new();
+                          for case in cases_vec.as_slice() {
+                              match *case {
+                                  &KlElement::Cons(ref predicate_action) => {
+                                      let pair = shen_cons_to_vec(predicate_action);
+                                      match pair.as_slice() {
+                                          &[predicate,action] => {
+                                              if !shen_is_thunk(predicate) || !shen_is_thunk(action) {
+                                                  return KlClosure::Done(shen_make_error("shen_cond: All cases must be a pairs of thunks."))
+                                              }
+                                              else {
+                                                  pairs.push((predicate,action))
+                                              }
+                                          }
+                                          _ => return KlClosure::Done(shen_make_error("shen_cond: All cases must be pairs."))
+                                      }
+                                  },
+                                  _ => return KlClosure::Done(shen_make_error("shen_cond: All cases must be a pairs of thunks."))
+                              }
+                          }
+                          let mut result = None;
+                          for &(predicate,action) in pairs.as_slice() {
+                              let predicate_thunk = shen_extract_from_thunk(predicate).unwrap();
+                              let forced = predicate_thunk();
+                              if !shen_is_bool(&forced) {
+                                  result = Some(KlClosure::Done(shen_make_error("shen_cond: All predicates must evaluate to 'true' or 'false'.")))
+                              }
+                              else {
+                                  match &*forced {
+                                      &KlElement::Symbol(ref s) if s.as_str() == "true" => {
+                                          let forced = shen_extract_from_thunk(action).unwrap()();
+                                          result = Some(KlClosure::Done(Ok(forced)));
+                                      },
+                                      _ => ()
+                                  }
+                              }
+                          }
+                          match result {
+                              Some(r) => r,
+                              None => KlClosure::Done(shen_make_error("shen_cond: None of the predicates evaluated to 'true'."))
+
+                          }
+                      },
+                      _ => KlClosure::Done(shen_make_error("shen_cond: All cases must be predicate/action pairs."))
+                  }
               }
           )
       )
