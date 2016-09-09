@@ -9,6 +9,8 @@ use std::path::Path;
 use std::fs::File;
 use std::io::prelude::*;
 use std::rc::Rc;
+use std::collections::HashMap;
+use std::cell::RefCell;
 // Preamble:1 ends here
 
 // [[file:../shen-rust.org::*Token%20Types][Token\ Types:1]]
@@ -46,7 +48,7 @@ pub struct KlError { cause : String }
 pub enum KlClosure {
     FeedMe(Rc<Fn(Rc<KlElement>) -> KlClosure>),
     Thunk(Rc<Fn() -> Rc<KlElement>>),
-    Done(Result<Rc<KlElement>,Rc<String>>)
+    Done(Result<Option<Rc<KlElement>>,Rc<String>>)
 }
 // Token\ Types:1 ends here
 
@@ -262,6 +264,10 @@ fn collect_sexps(kl: &[u8], kl_buffer: &mut Vec<Vec<KlToken>>) -> () {
 }
 // Collect:1 ends here
 
+// [[file:../shen-rust.org::*Symbol%20Table][Symbol\ Table:1]]
+thread_local!(static SYMBOL_TABLE: RefCell<HashMap<String, Rc<KlElement>>> = RefCell::new(HashMap::new()));
+// Symbol\ Table:1 ends here
+
 // [[file:../shen-rust.org::*Path%20Utilites][Path\ Utilites:1]]
 pub fn add_path (old_path:&Vec<usize>, new_path:Vec<usize>) -> Vec<usize> {
     let mut p = old_path.clone();
@@ -417,6 +423,17 @@ pub fn get_all_tail_calls (sexp: &KlToken) -> Vec<Vec<usize>> {
 // Get\ Tail\ Calls:1 ends here
 
 // [[file:../shen-rust.org::*Helpers][Helpers:1]]
+pub fn shen_symbol_to_string(s : &KlElement) -> Result<Rc<&String>, Rc<String>> {
+    match s {
+        &KlElement::Symbol(ref s) => Ok(Rc::new(&s)),
+        _ => Err(Rc::new(String::from("shen_symbol_to_string: Expecting a symbol.")))
+    }
+}
+
+pub fn shen_string_to_symbol(s : &str) -> Rc<KlElement> {
+    Rc::new(KlElement::Symbol(String::from(s)))
+}
+
 pub fn shen_cons_to_vec (cons_cells: &KlCons) -> Vec<&KlElement> {
     let mut result : Vec<&KlElement> = Vec::new();
     let mut so_far = cons_cells;
@@ -452,10 +469,61 @@ pub fn shen_extract_from_thunk(a : &KlElement) -> Option<&Rc<Fn() -> Rc<KlElemen
     }
 }
 
-pub fn shen_make_error(s : &str) -> Result<Rc<KlElement>, Rc<String>> {
+pub fn shen_make_error(s : &str) -> Result<Option<Rc<KlElement>>, Rc<String>> {
     Err(Rc::new(String::from(s)))
 }
 // Helpers:1 ends here
+
+// [[file:../shen-rust.org::*Setting/Getting][Setting/Getting:1]]
+pub fn shen_set () -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | symbol | {
+                KlClosure::FeedMe(
+                    Rc::new(
+                        move | value | {
+                            let symbol = symbol.clone();
+                            SYMBOL_TABLE.with(| symbol_table | {
+                                let mut map = symbol_table.borrow_mut();
+                                let symbol_string = shen_symbol_to_string(&*symbol);
+                                match symbol_string {
+                                    Ok(s) => {
+                                        map.insert((*s).clone(), value);
+                                        return KlClosure::Done(Ok(None))
+                                    }
+                                    _ => return KlClosure::Done(shen_make_error("shen_set: expecting a symbol for a key."))
+                                }
+                            })
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
+
+pub fn shen_value() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | symbol | {
+                SYMBOL_TABLE.with(| symbol_table| {
+                    let map = symbol_table.borrow();
+                    let symbol_string = shen_symbol_to_string(&*symbol);
+                    match symbol_string {
+                        Ok(s) => {
+                            match map.get(*s) {
+                                Some(v) => KlClosure::Done(Ok(Some(v.clone()))),
+                                None => KlClosure::Done(Err(Rc::new(format!("variable {} is unbound", (*s)))))
+                            }
+                        },
+                        _ => return KlClosure::Done(shen_make_error("shen_value: expecting a symbol for a key."))
+                    }
+                })
+            }
+        )
+    )
+}
+// Setting/Getting:1 ends here
 
 // [[file:../shen-rust.org::*If][If:1]]
 pub fn shen_if () -> KlClosure {
@@ -491,11 +559,11 @@ pub fn shen_if () -> KlClosure {
                                                         match *predicate {
                                                             KlElement::Symbol(ref s) if s.as_str() == "true" => {
                                                                 let forced = if_branch();
-                                                                KlClosure::Done(Ok(forced))
+                                                                KlClosure::Done(Ok(Some(forced)))
                                                             },
                                                             KlElement::Symbol(ref s) if s.as_str() == "false" => {
                                                                 let forced = else_branch();
-                                                                KlClosure::Done(Ok(forced))
+                                                                KlClosure::Done(Ok(Some(forced)))
                                                             },
                                                             _ => KlClosure::Done(Err(Rc::new(String::from("Expecting predicate to be 'true' or 'false'."))))
                                                         }
@@ -546,7 +614,7 @@ pub fn shen_and () -> KlClosure {
                                             match &*forced {
                                                 &KlElement::Symbol(ref a)
                                                     if a.as_str() == "false" =>
-                                                    KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("false"))))),
+                                                    KlClosure::Done(Ok(Some(shen_string_to_symbol("false")))),
                                                 _ => {
                                                     let forced = b();
                                                     if !shen_is_bool(&forced) {
@@ -556,8 +624,8 @@ pub fn shen_and () -> KlClosure {
                                                         match &*forced {
                                                             &KlElement::Symbol(ref b)
                                                                 if b.as_str() == "false" =>
-                                                                KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("false"))))),
-                                                            _ => KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("true")))))
+                                                                KlClosure::Done(Ok(Some(shen_string_to_symbol("false")))),
+                                                            _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("true"))))
                                                         }
                                                     }
                                                 }
@@ -606,7 +674,7 @@ pub fn shen_or () -> KlClosure {
                                             match &*forced {
                                                 &KlElement::Symbol(ref a)
                                                     if a.as_str() == "true" =>
-                                                    KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("true"))))),
+                                                    KlClosure::Done(Ok(Some(shen_string_to_symbol("true")))),
                                                 _ => {
                                                     let forced = b();
                                                     if !shen_is_bool(&forced) {
@@ -616,8 +684,8 @@ pub fn shen_or () -> KlClosure {
                                                         match &*forced {
                                                             &KlElement::Symbol(ref b)
                                                                 if b.as_str() == "true" =>
-                                                                KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("true"))))),
-                                                            _ => KlClosure::Done(Ok(Rc::new(KlElement::Symbol(String::from("false")))))
+                                                                KlClosure::Done(Ok(Some(shen_string_to_symbol("true")))),
+                                                            _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("false"))))
                                                         }
                                                     }
                                                 }
@@ -674,7 +742,7 @@ pub fn shen_cond() -> KlClosure {
                                 match &*forced {
                                     &KlElement::Symbol(ref s) if s.as_str() == "true" => {
                                         let forced = shen_extract_from_thunk(action).unwrap()();
-                                        result = Some(KlClosure::Done(Ok(forced)));
+                                        result = Some(KlClosure::Done(Ok(Some(forced))));
                                     },
                                     _ => ()
                                 }
