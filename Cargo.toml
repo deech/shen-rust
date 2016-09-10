@@ -10,6 +10,7 @@ license = "MIT"
 [dependencies]
 libc = "*"
 nom = "^1.2.4"
+uuid = { version = "^0.2", features = ["v4"] }
 ref_eq = "^1.0.0"
 syntex = { version = "^0.42.2" }
 syntex_syntax = { version = "^0.42.0" }

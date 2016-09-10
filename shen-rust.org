@@ -6,73 +6,81 @@
 
 * Package Details
 #+BEGIN_SRC toml :tangle Cargo.toml
-    [package]
-    name = "shen-rust"
-    version = "0.0.1"
-    authors = ["aditya.siram@gmail.com"]
-    description = "An implementation of Shen in Rust"
-    repository = "https://github.com/deech/shen-rust"
-    license = "MIT"
+  [package]
+  name = "shen-rust"
+  version = "0.0.1"
+  authors = ["aditya.siram@gmail.com"]
+  description = "An implementation of Shen in Rust"
+  repository = "https://github.com/deech/shen-rust"
+  license = "MIT"
 
-    [dependencies]
-    libc = "*"
-    nom = "^1.2.4"
-    ref_eq = "^1.0.0"
-    syntex = { version = "^0.42.2" }
-    syntex_syntax = { version = "^0.42.0" }
-    aster = { version = "^0.25.0", features = ["with-syntex"] }
-    quasi = { version = "^0.18.0", features = ["with-syntex"] }
+  [dependencies]
+  libc = "*"
+  nom = "^1.2.4"
+  uuid = { version = "^0.2", features = ["v4"] }
+  ref_eq = "^1.0.0"
+  syntex = { version = "^0.42.2" }
+  syntex_syntax = { version = "^0.42.0" }
+  aster = { version = "^0.25.0", features = ["with-syntex"] }
+  quasi = { version = "^0.18.0", features = ["with-syntex"] }
 #+END_SRC
 * Preamble
 #+BEGIN_SRC rust :tangle src/main.rs
-    #![feature(slice_patterns)]
-    #![feature(custom_derive)]
-    #![feature(box_patterns)]
-    #[macro_use]
-    extern crate nom;
-    use std::str;
-    use nom::*;
-    use std::path::Path;
-    use std::fs::File;
-    use std::io::prelude::*;
-    use std::rc::Rc;
-    use std::collections::HashMap;
-    use std::cell::RefCell;
+  #![feature(slice_patterns)]
+  #![feature(custom_derive)]
+  #![feature(box_patterns)]
+  #[macro_use]
+  extern crate nom;
+  extern crate uuid;
+  use std::str;
+  use nom::*;
+  use std::path::Path;
+  use std::fs::File;
+  use std::io::prelude::*;
+  use std::rc::Rc;
+  use std::collections::HashMap;
+  use std::cell::RefCell;
+  use uuid::Uuid;
 #+END_SRC
 * Types
 ** Token Types
 #+BEGIN_SRC rust :tangle src/main.rs
-    #[derive(Debug)]
-    pub enum KlToken {
-        Symbol(String),
-        Number(KlNumber),
-        String(String),
-        Sexp(Vec<KlToken>),
-    }
+  #[derive(Debug)]
+  pub enum KlToken {
+      Symbol(String),
+      Number(KlNumber),
+      String(String),
+      Sexp(Vec<KlToken>),
+  }
 
-    #[derive(Debug)]
-    pub enum KlNumber {
-        Float(f64),
-        Int(i64),
-    }
+  #[derive(Debug)]
+  pub enum KlNumber {
+      Float(f64),
+      Int(i64),
+  }
 
-    pub enum KlElement {
-        Symbol(String),
-        Number(KlNumber),
-        String(String),
-        Cons(Vec<Rc<KlElement>>),
-        Closure(KlClosure),
-        Vector(Vec<KlElement>)
-    }
+  pub struct UniqueVector {
+      uuid: Uuid,
+      vector: RefCell<Vec<Rc<KlElement>>>
+  }
 
-    #[derive(Debug)]
-    pub struct KlError { cause : String }
+  pub enum KlElement {
+      Symbol(String),
+      Number(KlNumber),
+      String(String),
+      Cons(Vec<Rc<KlElement>>),
+      Closure(KlClosure),
+      Vector(Rc<UniqueVector>)
+  }
 
-    pub enum KlClosure {
-        FeedMe(Rc<Fn(Rc<KlElement>) -> KlClosure>),
-        Thunk(Rc<Fn() -> Rc<KlElement>>),
-        Done(Result<Option<Rc<KlElement>>,Rc<String>>)
-    }
+  #[derive(Debug)]
+  pub struct KlError { cause : String }
+
+  pub enum KlClosure {
+      FeedMe(Rc<Fn(Rc<KlElement>) -> KlClosure>),
+      Thunk(Rc<Fn() -> Rc<KlElement>>),
+      Done(Result<Option<Rc<KlElement>>,Rc<String>>)
+  }
 #+END_SRC
 * Parsing
 ** Symbols
@@ -295,6 +303,30 @@
 ** Symbol Table
 #+BEGIN_SRC rust :tangle src/main.rs
   thread_local!(static SYMBOL_TABLE: RefCell<HashMap<String, Rc<KlElement>>> = RefCell::new(HashMap::new()));
+#+END_SRC
+** Vector Table
+#+BEGIN_SRC rust :tangle src/main.rs
+  thread_local!(static VECTOR_TABLE: RefCell<Vec<(Rc<UniqueVector>, RefCell<Vec<usize>>)>> = RefCell::new(Vec::new()));
+
+  pub fn shen_with_unique_vector (unique_vector: &UniqueVector, tx: Box<Fn(&RefCell<Vec<usize>>) -> ()>)
+                                  -> Option<()> {
+      VECTOR_TABLE.with(| vector_table | {
+          let vector_table = vector_table.borrow_mut();
+          let mut iter = vector_table.iter().take_while(| &tuple | {
+              match tuple {
+                  &(ref vector,_) => {
+                      let uuid = vector.uuid;
+                      uuid != unique_vector.uuid
+                  }
+              }
+          }).peekable();
+          let found : Option<&&(Rc<UniqueVector>, RefCell<Vec<usize>>)> = iter.peek();
+          match found {
+              Some(&&(_, ref indices)) => Some(tx(indices)),
+              None => None
+          }
+      })
+  }
 #+END_SRC
 * Code Generation
 ** Path Utilites
@@ -860,34 +892,124 @@
 *** absvector
 #+BEGIN_SRC rust :tangle src/main.rs
   pub fn shen_absvector() -> KlClosure {
-      KlClosure::Done(Ok(Some(Rc::new(KlElement::Vector(Vec::new())))))
+      let v = Vec::new();
+      let uuid = Uuid::new_v4();
+      let unique_vector = Rc::new(UniqueVector{ uuid: uuid, vector: RefCell::new(v) });
+      VECTOR_TABLE.with(| vector_map | {
+          let mut vector_map = vector_map.borrow_mut();
+          vector_map.push((unique_vector.clone(), RefCell::new(Vec::new())));
+      });
+      KlClosure::Done(Ok(Some(Rc::new(KlElement::Vector(unique_vector)))))
   }
 #+END_SRC
 *** address->
 #+BEGIN_SRC rust :tangle src/main.rs
-  // pub fn shen_insert_at_address() -> KlClosure {
-  //     KlClosure::FeedMe(
-  //         Rc::new(
-  //             | vector | {
-  //                 KlClosure::FeedMe(
-  //                     Rc::new(
-  //                         move | index | {
-  //                             let vector = vector.clone();
-  //                             KlClosure::FeedMe(
-  //                                 Rc::new(
-  //                                     move | value | {
-  //
-  //                                     }
-  //                                 )
-  //                             )
-  //                         }
-  //                     )
-  //                 )
-  //             }
-  //         )
-  //     )
-  // }
+  pub fn shen_insert_at_address() -> KlClosure {
+      KlClosure::FeedMe(
+          Rc::new(
+              | vector | {
+                  KlClosure::FeedMe(
+                      Rc::new(
+                          move | index | {
+                              let vector = vector.clone();
+                              KlClosure::FeedMe(
+                                  Rc::new(
+                                      move | value | {
+                                          match &*vector {
+                                              &KlElement::Vector(ref unique_vector) => {
+                                                  match *index {
+                                                      KlElement::Number(KlNumber::Int(i)) if i >= 0 => {
+                                                          let mut payload = (**unique_vector).vector.borrow_mut();
+                                                          let length = payload.len();
+                                                          if i as usize <= length {
+                                                              payload[i as usize] = value.clone();
+                                                              match &*value {
+                                                                  &KlElement::Vector(_) | &KlElement::Cons(_) => {
+                                                                      let tx = Box::new(
+                                                                          move | ref_cell : &RefCell<Vec<usize>> | {
+                                                                              let mut v = (*ref_cell).borrow_mut();
+                                                                              v.push(i.clone() as usize);
+                                                                          }
+                                                                      );
+                                                                      shen_with_unique_vector(&unique_vector, tx);
+                                                                  },
+                                                                  _ => ()
+                                                              };
+                                                              KlClosure::Done(Ok(Some(vector.clone())))
+                                                          }
+                                                          else {
+                                                              KlClosure::Done(shen_make_error("shen_insert_at_address: Expecting a positive integer less than the vector length."))
+                                                          }
+                                                      },
+                                                      _ => KlClosure::Done(shen_make_error("shen_insert_at_address: Expecting a positive number."))
+                                                  }
+                                              },
+                                              _ => KlClosure::Done(shen_make_error("shen_insert_at_address: Expecting a vector."))
+                                          }
+                                      }
+                                  )
+                              )
+                          }
+                      )
+                  )
+              }
+          )
+      )
+  }
 #+END_SRC
+*** <-address
+#+BEGIN_SRC rust :tangle src/main.rs
+  pub fn shen_get_at_address() -> KlClosure {
+      KlClosure::FeedMe(
+          Rc::new(
+              | vector | {
+                  KlClosure::FeedMe(
+                      Rc::new(
+                          move | index | {
+                              let vector = vector.clone();
+                              match &*vector {
+                                  &KlElement::Vector(ref unique_vector) => {
+                                      match *index {
+                                          KlElement::Number(KlNumber::Int(i)) if i > 0 => {
+                                              let payload = (**unique_vector).vector.borrow();
+                                              let length = payload.len();
+                                              if i as usize <= length {
+                                                  let ref found = payload[i as usize];
+                                                  KlClosure::Done(Ok(Some((*found).clone())))
+                                              }
+                                              else {
+                                                  KlClosure::Done(Ok(None))
+                                              }
+                                          },
+                                          _ => KlClosure::Done(shen_make_error("shen_insert_at_address: Expecting a positive number."))
+                                      }
+                                  },
+                                  _ => KlClosure::Done(shen_make_error("shen_insert_at_address: Expecting a vector."))
+                              }
+                          }
+                      )
+                  )
+              }
+          )
+      )
+  }
+#+END_SRC
+*** absvector?
+#+BEGIN_SRC rust :tangle src/main.rs
+  pub fn shen_absvectorp() -> KlClosure {
+      KlClosure::FeedMe(
+          Rc::new(
+              | vector | {
+                  match &*vector {
+                      &KlElement::Vector(_) => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("true")))))),
+                      _ => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("false")))))),
+                  }
+              }
+          )
+      )
+  }
+#+END_SRC
+
 * Bootstrap
 ** KLambda Files
 #+BEGIN_SRC rust :tangle src/main.rs

@@ -4,6 +4,7 @@
 #![feature(box_patterns)]
 #[macro_use]
 extern crate nom;
+extern crate uuid;
 use std::str;
 use nom::*;
 use std::path::Path;
@@ -12,6 +13,7 @@ use std::io::prelude::*;
 use std::rc::Rc;
 use std::collections::HashMap;
 use std::cell::RefCell;
+use uuid::Uuid;
 // Preamble:1 ends here
 
 // [[file:../shen-rust.org::*Token%20Types][Token\ Types:1]]
@@ -29,13 +31,18 @@ pub enum KlNumber {
     Int(i64),
 }
 
+pub struct UniqueVector {
+    uuid: Uuid,
+    vector: RefCell<Vec<Rc<KlElement>>>
+}
+
 pub enum KlElement {
     Symbol(String),
     Number(KlNumber),
     String(String),
     Cons(Vec<Rc<KlElement>>),
     Closure(KlClosure),
-    Vector(Vec<KlElement>)
+    Vector(Rc<UniqueVector>)
 }
 
 #[derive(Debug)]
@@ -263,6 +270,30 @@ fn collect_sexps(kl: &[u8], kl_buffer: &mut Vec<Vec<KlToken>>) -> () {
 // [[file:../shen-rust.org::*Symbol%20Table][Symbol\ Table:1]]
 thread_local!(static SYMBOL_TABLE: RefCell<HashMap<String, Rc<KlElement>>> = RefCell::new(HashMap::new()));
 // Symbol\ Table:1 ends here
+
+// [[file:../shen-rust.org::*Vector%20Table][Vector\ Table:1]]
+thread_local!(static VECTOR_TABLE: RefCell<Vec<(Rc<UniqueVector>, RefCell<Vec<usize>>)>> = RefCell::new(Vec::new()));
+
+pub fn shen_with_unique_vector (unique_vector: &UniqueVector, tx: Box<Fn(&RefCell<Vec<usize>>) -> ()>)
+                                -> Option<()> {
+    VECTOR_TABLE.with(| vector_table | {
+        let vector_table = vector_table.borrow_mut();
+        let mut iter = vector_table.iter().take_while(| &tuple | {
+            match tuple {
+                &(ref vector,_) => {
+                    let uuid = vector.uuid;
+                    uuid != unique_vector.uuid
+                }
+            }
+        }).peekable();
+        let found : Option<&&(Rc<UniqueVector>, RefCell<Vec<usize>>)> = iter.peek();
+        match found {
+            Some(&&(_, ref indices)) => Some(tx(indices)),
+            None => None
+        }
+    })
+}
+// Vector\ Table:1 ends here
 
 // [[file:../shen-rust.org::*Path%20Utilites][Path\ Utilites:1]]
 pub fn add_path (old_path:&Vec<usize>, new_path:Vec<usize>) -> Vec<usize> {
@@ -820,34 +851,123 @@ pub fn shen_consp() -> KlClosure {
 
 // [[file:../shen-rust.org::*absvector][absvector:1]]
 pub fn shen_absvector() -> KlClosure {
-    KlClosure::Done(Ok(Some(Rc::new(KlElement::Vector(Vec::new())))))
+    let v = Vec::new();
+    let uuid = Uuid::new_v4();
+    let unique_vector = Rc::new(UniqueVector{ uuid: uuid, vector: RefCell::new(v) });
+    VECTOR_TABLE.with(| vector_map | {
+        let mut vector_map = vector_map.borrow_mut();
+        vector_map.push((unique_vector.clone(), RefCell::new(Vec::new())));
+    });
+    KlClosure::Done(Ok(Some(Rc::new(KlElement::Vector(unique_vector)))))
 }
 // absvector:1 ends here
 
 // [[file:../shen-rust.org::*address->][address->:1]]
-// pub fn shen_insert_at_address() -> KlClosure {
-//     KlClosure::FeedMe(
-//         Rc::new(
-//             | vector | {
-//                 KlClosure::FeedMe(
-//                     Rc::new(
-//                         move | index | {
-//                             let vector = vector.clone();
-//                             KlClosure::FeedMe(
-//                                 Rc::new(
-//                                     move | value | {
-//
-//                                     }
-//                                 )
-//                             )
-//                         }
-//                     )
-//                 )
-//             }
-//         )
-//     )
-// }
+pub fn shen_insert_at_address() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | vector | {
+                KlClosure::FeedMe(
+                    Rc::new(
+                        move | index | {
+                            let vector = vector.clone();
+                            KlClosure::FeedMe(
+                                Rc::new(
+                                    move | value | {
+                                        match &*vector {
+                                            &KlElement::Vector(ref unique_vector) => {
+                                                match *index {
+                                                    KlElement::Number(KlNumber::Int(i)) if i >= 0 => {
+                                                        let mut payload = (**unique_vector).vector.borrow_mut();
+                                                        let length = payload.len();
+                                                        if i as usize <= length {
+                                                            payload[i as usize] = value.clone();
+                                                            match &*value {
+                                                                &KlElement::Vector(_) | &KlElement::Cons(_) => {
+                                                                    let tx = Box::new(
+                                                                        move | ref_cell : &RefCell<Vec<usize>> | {
+                                                                            let mut v = (*ref_cell).borrow_mut();
+                                                                            v.push(i.clone() as usize);
+                                                                        }
+                                                                    );
+                                                                    shen_with_unique_vector(&unique_vector, tx);
+                                                                },
+                                                                _ => ()
+                                                            };
+                                                            KlClosure::Done(Ok(Some(vector.clone())))
+                                                        }
+                                                        else {
+                                                            KlClosure::Done(shen_make_error("shen_insert_at_address: Expecting a positive integer less than the vector length."))
+                                                        }
+                                                    },
+                                                    _ => KlClosure::Done(shen_make_error("shen_insert_at_address: Expecting a positive number."))
+                                                }
+                                            },
+                                            _ => KlClosure::Done(shen_make_error("shen_insert_at_address: Expecting a vector."))
+                                        }
+                                    }
+                                )
+                            )
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
 // address->:1 ends here
+
+// [[file:../shen-rust.org::*<-address][<-address:1]]
+pub fn shen_get_at_address() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | vector | {
+                KlClosure::FeedMe(
+                    Rc::new(
+                        move | index | {
+                            let vector = vector.clone();
+                            match &*vector {
+                                &KlElement::Vector(ref unique_vector) => {
+                                    match *index {
+                                        KlElement::Number(KlNumber::Int(i)) if i > 0 => {
+                                            let payload = (**unique_vector).vector.borrow();
+                                            let length = payload.len();
+                                            if i as usize <= length {
+                                                let ref found = payload[i as usize];
+                                                KlClosure::Done(Ok(Some((*found).clone())))
+                                            }
+                                            else {
+                                                KlClosure::Done(Ok(None))
+                                            }
+                                        },
+                                        _ => KlClosure::Done(shen_make_error("shen_insert_at_address: Expecting a positive number."))
+                                    }
+                                },
+                                _ => KlClosure::Done(shen_make_error("shen_insert_at_address: Expecting a vector."))
+                            }
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
+// <-address:1 ends here
+
+// [[file:../shen-rust.org::*absvector?][absvector\?:1]]
+pub fn shen_absvectorp() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | vector | {
+                match &*vector {
+                    &KlElement::Vector(_) => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("true")))))),
+                    _ => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("false")))))),
+                }
+            }
+        )
+    )
+}
+// absvector\?:1 ends here
 
 // [[file:../shen-rust.org::*KLambda%20Files][KLambda\ Files:1]]
 const KLAMBDAFILES: &'static [ &'static str ] = &[
