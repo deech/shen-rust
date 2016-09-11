@@ -333,6 +333,10 @@
 #+BEGIN_SRC rust :tangle src/main.rs
   thread_local!(static SYMBOL_TABLE: RefCell<HashMap<String, Rc<KlElement>>> = RefCell::new(HashMap::new()));
 #+END_SRC
+** Function Table
+#+BEGIN_SRC rust :tangle src/main.rs
+  thread_local!(static FUNCTION_TABLE: RefCell<HashMap<String, KlClosure>> = RefCell::new(HashMap::new()));
+#+END_SRC
 ** Vector Table
 #+BEGIN_SRC rust :tangle src/main.rs
   thread_local!(static VECTOR_TABLE: RefCell<Vec<(Rc<UniqueVector>, RefCell<Vec<usize>>)>> = RefCell::new(Vec::new()));
@@ -1414,7 +1418,6 @@
   }
 #+END_SRC
 ** Time
-
 *** get-time
 #+BEGIN_SRC rust :tangle src/main.rs
   pub fn shen_get_time() -> KlClosure {
@@ -1581,6 +1584,52 @@
       )
   }
 #+END_SRC
+* Filling The Function Table
+#+BEGIN_SRC rust :tangle src/main.rs
+  pub fn shen_fill_function_table() {
+      FUNCTION_TABLE.with(| function_table | {
+          let mut map = function_table.borrow_mut();
+          map.insert(String::from("if")              ,shen_if());
+          map.insert(String::from("and")             ,shen_and());
+          map.insert(String::from("or")              ,shen_or());
+          map.insert(String::from("cond")            ,shen_cond());
+          map.insert(String::from("intern")          ,shen_intern());
+          map.insert(String::from("pos")             ,shen_pos());
+          map.insert(String::from("tlstr")           ,shen_tlstr());
+          map.insert(String::from("cn")              ,shen_cn());
+          map.insert(String::from("str")             ,shen_str());
+          map.insert(String::from("string?")         ,shen_stringp());
+          map.insert(String::from("n_to_string")     ,shen_n_to_string());
+          map.insert(String::from("string_to_n")     ,shen_string_to_n());
+          map.insert(String::from("simple_error ")   ,shen_simple_error ());
+          map.insert(String::from("trap_error")      ,shen_trap_error());
+          map.insert(String::from("error_to_string") ,shen_error_to_string());
+          map.insert(String::from("set")             ,shen_set());
+          map.insert(String::from("value")           ,shen_value());
+          map.insert(String::from("cons")            ,shen_cons());
+          map.insert(String::from("hd")              ,shen_hd());
+          map.insert(String::from("tl")              ,shen_tl());
+          map.insert(String::from("cons?")           ,shen_consp());
+          map.insert(String::from("absvector")       ,shen_absvector());
+          map.insert(String::from("address->")       ,shen_insert_at_address());
+          map.insert(String::from("<-address")       ,shen_get_at_address());
+          map.insert(String::from("absvectorp")      ,shen_absvectorp());
+          map.insert(String::from("write_byte")      ,shen_write_byte());
+          map.insert(String::from("read_byte")       ,shen_read_byte());
+          map.insert(String::from("open")            ,shen_open());
+          map.insert(String::from("get_time")        ,shen_get_time());
+          map.insert(String::from("+")               ,shen_plus());
+          map.insert(String::from("*")               ,shen_mul());
+          map.insert(String::from("-")               ,shen_sub());
+          map.insert(String::from("/")               ,shen_div());
+          map.insert(String::from(">")               ,shen_ge());
+          map.insert(String::from("<")               ,shen_le());
+          map.insert(String::from("<=")              ,shen_eq_le());
+          map.insert(String::from(">=")              ,shen_eq_ge());
+          map.insert(String::from("number?")         ,shen_numberp());
+      })
+  }
+#+END_SRC
 * Bootstrap
 ** KLambda Files
 #+BEGIN_SRC rust :tangle src/main.rs
@@ -1593,6 +1642,7 @@
 
 #+BEGIN_SRC rust :tangle src/main.rs
     fn main () {
+        shen_fill_function_table();
         let with_klambda_path : Vec<String> = KLAMBDAFILES
             .into_iter()
             .map(|f| {"KLambda/".to_string() + f})
