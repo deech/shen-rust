@@ -1,10 +1,12 @@
 // [[file:../shen-rust.org::*Preamble][Preamble:1]]
 #![feature(slice_patterns)]
 #![feature(custom_derive)]
-#![feature(box_patterns)]
+#![feature(try_from)]
 #[macro_use]
 extern crate nom;
 extern crate uuid;
+extern crate time;
+extern crate core;
 use std::str;
 use nom::*;
 use std::path::Path;
@@ -14,6 +16,9 @@ use std::rc::Rc;
 use std::collections::HashMap;
 use std::cell::RefCell;
 use uuid::Uuid;
+use std::io::{self, Error};
+use std::convert::TryFrom;
+use std::ops::{Add, Sub, Mul, Div};
 // Preamble:1 ends here
 
 // [[file:../shen-rust.org::*Token%20Types][Token\ Types:1]]
@@ -36,22 +41,45 @@ pub struct UniqueVector {
     vector: RefCell<Vec<Rc<KlElement>>>
 }
 
+pub enum KlStreamDirection {
+    In,
+    Out
+}
+
+pub struct KlFileStream {
+    direction : KlStreamDirection,
+    file: RefCell<File>
+}
+
+pub enum KlStdStream {
+    Stdout,
+    Stdin
+}
+
+pub enum KlStream {
+    FileStream(KlFileStream),
+    Std(KlStdStream)
+}
+
 pub enum KlElement {
     Symbol(String),
     Number(KlNumber),
     String(String),
     Cons(Vec<Rc<KlElement>>),
     Closure(KlClosure),
-    Vector(Rc<UniqueVector>)
+    Vector(Rc<UniqueVector>),
+    Stream(Rc<KlStream>)
 }
 
 #[derive(Debug)]
-pub struct KlError { cause : String }
+pub enum KlError {
+    ErrorString(String)
+}
 
 pub enum KlClosure {
     FeedMe(Rc<Fn(Rc<KlElement>) -> KlClosure>),
     Thunk(Rc<Fn() -> Rc<KlElement>>),
-    Done(Result<Option<Rc<KlElement>>,Rc<String>>)
+    Done(Result<Option<Rc<KlElement>>,Rc<KlError>>)
 }
 // Token\ Types:1 ends here
 
@@ -461,18 +489,6 @@ pub fn shen_string_to_symbol(s : &str) -> Rc<KlElement> {
     Rc::new(KlElement::Symbol(String::from(s)))
 }
 
-// pub fn shen_cons_to_vec (cons: Rc<KlElement>) -> Vec<Rc<KlElement>> {
-//     match &*cons {
-//         &KlElement::Cons(ref car, ref cdr) => {
-//             let ref mut result : Vec<Rc<KlElement>> = cdr.clone();
-//             result.push(car.clone());
-//             result.reverse();
-//             result.clone()
-//         },
-//         _ => Vec::new()
-//     }
-// }
-
 pub fn shen_is_bool (a: Rc<KlElement>) -> bool {
     match &*a {
         &KlElement::Symbol(ref s) if s.as_str() == "true" || s.as_str() == "false" => true,
@@ -487,69 +503,17 @@ pub fn shen_is_thunk(a: Rc<KlElement>) -> bool {
     }
 }
 
-pub fn shen_force_thunk(a : Rc<KlElement>) -> Result<Option<Rc<KlElement>>,Rc<String>> {
+pub fn shen_force_thunk(a : Rc<KlElement>) -> Result<Option<Rc<KlElement>>,Rc<KlError>> {
     match &*a {
         &KlElement::Closure(KlClosure::Thunk(ref inner)) => Ok(Some(inner())),
         _ => shen_make_error("shen_force_thunk: Expected a thunk.")
-     }
+    }
 }
-pub fn shen_make_error(s : &str) -> Result<Option<Rc<KlElement>>, Rc<String>> {
-    Err(Rc::new(String::from(s)))
+
+pub fn shen_make_error(s : &str) -> Result<Option<Rc<KlElement>>, Rc<KlError>> {
+    Err(Rc::new((KlError::ErrorString(String::from(s)))))
 }
 // Helpers:1 ends here
-
-// [[file:../shen-rust.org::*Set][Set:1]]
-pub fn shen_set () -> KlClosure {
-    KlClosure::FeedMe(
-        Rc::new(
-            | symbol | {
-                KlClosure::FeedMe(
-                    Rc::new(
-                        move | value | {
-                            let symbol = symbol.clone();
-                            SYMBOL_TABLE.with(| symbol_table | {
-                                let mut map = symbol_table.borrow_mut();
-                                let symbol_string = shen_symbol_to_string(&*symbol);
-                                match symbol_string {
-                                    Ok(s) => {
-                                        map.insert((*s).clone(), value);
-                                        return KlClosure::Done(Ok(None))
-                                    }
-                                    _ => return KlClosure::Done(shen_make_error("shen_set: expecting a symbol for a key."))
-                                }
-                            })
-                        }
-                    )
-                )
-            }
-        )
-    )
-}
-// Set:1 ends here
-
-// [[file:../shen-rust.org::*Get][Get:1]]
-pub fn shen_value() -> KlClosure {
-    KlClosure::FeedMe(
-        Rc::new(
-            | symbol | {
-                SYMBOL_TABLE.with(| symbol_table| {
-                    let map = symbol_table.borrow();
-                    let symbol_string = shen_symbol_to_string(&*symbol);
-                    match symbol_string {
-                        Ok(s) => {
-                            match map.get(*s) {
-                                Some(v) => KlClosure::Done(Ok(Some(v.clone()))),
-                                None => KlClosure::Done(Err(Rc::new(format!("variable {} is unbound", (*s)))))
-                            }
-                        },
-                        _ => return KlClosure::Done(shen_make_error("shen_value: expecting a symbol for a key."))
-                    }
-                })
-            }
-        )
-    )
-}
-// Get:1 ends here
 
 // [[file:../shen-rust.org::*If][If:1]]
 pub fn shen_if () -> KlClosure {
@@ -578,7 +542,7 @@ pub fn shen_if () -> KlClosure {
                                                     KlElement::Symbol(ref s) if s.as_str() == "false" => {
                                                         KlClosure::Done(shen_force_thunk(else_thunk.clone()))
                                                     },
-                                                    _ => KlClosure::Done(Err(Rc::new(String::from("Expecting predicate to be 'true' or 'false'."))))
+                                                    _ => KlClosure::Done(shen_make_error("Expecting predicate to be 'true' or 'false'."))
                                                 }
                                             }
                                         }
@@ -746,15 +710,209 @@ pub fn shen_cond() -> KlClosure {
 }
 // Cond:1 ends here
 
-// [[file:../shen-rust.org::*Print%20Error][Print\ Error:1]]
+// [[file:../shen-rust.org::*Intern][Intern:1]]
+pub fn shen_intern() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | string | {
+                match &*string {
+                    &KlElement::String(ref s) => {
+                        KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(s.clone())))))
+                    },
+                    _ => KlClosure::Done(shen_make_error("shen_intern: expecting a string."))
+                }
+            }
+        )
+    )
+}
+// Intern:1 ends here
+
+// [[file:../shen-rust.org::*pos][pos:1]]
+pub fn shen_pos() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | string | {
+                KlClosure::FeedMe(
+                    Rc::new(
+                        move | number | {
+                            let string = string.clone();
+                            match &*string {
+                                &KlElement::String(ref s) => {
+                                    let length = (&s).chars().count();
+                                    match &*number {
+                                        &KlElement::Number(KlNumber::Int(i)) if i > 0 && (i as usize) < length => {
+                                            let char = (*s).chars().nth(i as usize).unwrap();
+                                            let mut result = String::from("");
+                                            result.push(char);
+                                            KlClosure::Done(Ok(Some(Rc::new(KlElement::String(result)))))
+                                        },
+                                        _ => KlClosure::Done(shen_make_error("shen_pos: expecting a number between 0 and the length of the string."))
+                                    }
+                                },
+                                _ => KlClosure::Done(shen_make_error("shen_pos: expecting a string."))
+                            }
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
+// pos:1 ends here
+
+// [[file:../shen-rust.org::*tlstr][tlstr:1]]
+pub fn shen_tlstr() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | string | {
+                match &*string {
+                    &KlElement::String(ref s) => {
+                        let length = (&s).chars().count();
+                        if length == 0 {
+                            KlClosure::Done(shen_make_error("shen_tlstr: expecting non-empty string."))
+                        }
+                        else {
+                            let (_, tail) = (&s).split_at(1);
+                            KlClosure::Done(Ok(Some(Rc::new(KlElement::String(String::from(tail))))))
+                        }
+                    },
+                    _ => KlClosure::Done(shen_make_error("shen_pos: expecting a string."))
+                }
+
+            }
+        )
+    )
+}
+// tlstr:1 ends here
+
+// [[file:../shen-rust.org::*cn][cn:1]]
+pub fn shen_cn () -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | string_a | {
+                KlClosure::FeedMe(
+                    Rc::new(
+                        move | string_b | {
+                            let string_a = string_a.clone();
+                            match (&*string_a, &*string_b) {
+                                (&KlElement::String(ref a), &KlElement::String(ref b)) => {
+                                    KlClosure::Done(Ok(Some(Rc::new(KlElement::String((*a).clone() + b)))))
+                                },
+                                _ => KlClosure::Done(shen_make_error("shen_cn: expecting two strings."))
+                            }
+
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
+// cn:1 ends here
+
+// [[file:../shen-rust.org::*str][str:1]]
+pub fn shen_str() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | atom | {
+                match &*atom {
+                    &KlElement::String(_) => KlClosure::Done(Ok(Some(atom.clone()))),
+                    &KlElement::Number(KlNumber::Int(i)) =>
+                        KlClosure::Done(Ok(Some(Rc::new(KlElement::String(format!("{}", i)))))),
+                    &KlElement::Number(KlNumber::Float(f)) =>
+                        KlClosure::Done(Ok(Some(Rc::new(KlElement::String(format!("{}", f)))))),
+                    &KlElement::Symbol(ref s) =>
+                        KlClosure::Done(Ok(Some(Rc::new(KlElement::String(s.clone()))))),
+                    &KlElement::Stream(ref s) => {
+                        match &**s {
+                            &KlStream::FileStream(_) =>
+                                KlClosure::Done(Ok(Some(Rc::new(KlElement::String(String::from("<file stream>")))))),
+                            &KlStream::Std(KlStdStream::Stdout) =>
+                                KlClosure::Done(Ok(Some(Rc::new(KlElement::String(String::from("<stdout>")))))),
+                            &KlStream::Std(KlStdStream::Stdin) =>
+                                KlClosure::Done(Ok(Some(Rc::new(KlElement::String(String::from("<stdin>")))))),
+                        }
+                    }
+                    _ => KlClosure::Done(shen_make_error("Not an atom, stream or closure; str cannot convert it to a string."))
+                }
+            }
+        )
+    )
+}
+// str:1 ends here
+
+// [[file:../shen-rust.org::*string?][string\?:1]]
+pub fn shen_stringp() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | element | {
+                match &*element {
+                    &KlElement::String(_) =>
+                        KlClosure::Done(Ok(Some(shen_string_to_symbol("true")))),
+                    _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("false"))))
+                }
+            }
+        )
+    )
+}
+// string\?:1 ends here
+
+// [[file:../shen-rust.org::*n->string][n->string:1]]
+pub fn shen_n_to_string() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | n | {
+                match &*n {
+                    &KlElement::Number(KlNumber::Int(i)) => {
+                        let convert : Result<u8, _>= TryFrom::try_from(i);
+                        match convert {
+                            Ok(char) => {
+                                match String::from_utf8(vec![char]) {
+                                    Ok(string) => {
+                                        KlClosure::Done(Ok(Some(Rc::new(KlElement::String(string)))))
+                                    },
+                                    Err(_) =>
+                                        KlClosure::Done(shen_make_error("shen_n_to_string: number is not utf8."))
+                                }
+                            },
+                            Err(_) => KlClosure::Done(shen_make_error("shen_n_to_string: number could not be converted to u8."))
+                        }
+                    },
+                    _ => KlClosure::Done(shen_make_error("shen_n_to_string: expecting an integer."))
+                }
+            }
+        )
+    )
+}
+// n->string:1 ends here
+
+// [[file:../shen-rust.org::*string->n][string->n:1]]
+pub fn shen_string_to_n() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | string | {
+                match &*string {
+                    &KlElement::String(ref s) if s.len() == 1 => {
+                        let v : Vec<u8> = (*s.clone()).into();
+                        KlClosure::Done(Ok(Some(Rc::new(KlElement::Number(KlNumber::Int(v[0] as i64))))))
+                    },
+                    _ => KlClosure::Done(shen_make_error("shen_string_to_n: expecting a unit string."))
+
+                }
+            }
+        )
+    )
+}
+// string->n:1 ends here
+
+// [[file:../shen-rust.org::*simple-error][simple-error:1]]
 pub fn shen_simple_error () -> KlClosure {
     KlClosure::FeedMe(
         Rc::new(
             | error | {
                 match *error {
                     KlElement::String(ref s) => {
-                        writeln!(&mut std::io::stderr(), "{}", s.as_str()).unwrap();
-                        KlClosure::Done(Ok(None))
+                        KlClosure::Done(shen_make_error(&s.as_str()))
                     },
                     _ => KlClosure::Done(shen_make_error("shen_simple_error: Expecting a string."))
                 }
@@ -762,7 +920,115 @@ pub fn shen_simple_error () -> KlClosure {
         )
     )
 }
-// Print\ Error:1 ends here
+// simple-error:1 ends here
+
+// [[file:../shen-rust.org::*trap-error][trap-error:1]]
+pub fn shen_trap_error() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | to_try_thunk | {
+                KlClosure::FeedMe(
+                    Rc::new(
+                        move | handler | {
+                            let to_try_thunk = to_try_thunk.clone();
+                            if !shen_is_thunk(to_try_thunk.clone()) {
+                                KlClosure::Done(shen_make_error("shen_trap_error: Expecting a thunk."))
+                            }
+                            else {
+                                match &*handler {
+                                    &KlElement::Closure(KlClosure::FeedMe(ref f)) => {
+                                        let forced = shen_force_thunk(to_try_thunk.clone());
+                                        match forced {
+                                            Ok(r) => { KlClosure::Done(Ok(r)) },
+                                            Err(s) => match &*s {
+                                                &KlError::ErrorString(ref s) => {
+                                                    let exception = Rc::new(KlElement::String(s.clone()));
+                                                    (&f)(exception.clone())
+                                                }
+                                            }
+                                        }
+                                    },
+                                    _ => KlClosure::Done(shen_make_error("Expecting a closure."))
+                                }
+                            }
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
+// trap-error:1 ends here
+
+// [[file:../shen-rust.org::*error-to-string][error-to-string:1]]
+pub fn shen_error_to_string() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | exception | {
+                match &*exception {
+                    &KlElement::String(ref s) => {
+                        KlClosure::Done(Ok(Some(Rc::new(KlElement::String(s.clone())))))
+                    },
+                    _ => KlClosure::Done(shen_make_error("shen_error_to_string: expecting a string."))
+                }
+            }
+        )
+    )
+}
+// error-to-string:1 ends here
+
+// [[file:../shen-rust.org::*Set][Set:1]]
+pub fn shen_set () -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | symbol | {
+                KlClosure::FeedMe(
+                    Rc::new(
+                        move | value | {
+                            let symbol = symbol.clone();
+                            SYMBOL_TABLE.with(| symbol_table | {
+                                let mut map = symbol_table.borrow_mut();
+                                let symbol_string = shen_symbol_to_string(&*symbol);
+                                match symbol_string {
+                                    Ok(s) => {
+                                        map.insert((*s).clone(), value);
+                                        return KlClosure::Done(Ok(None))
+                                    }
+                                    _ => return KlClosure::Done(shen_make_error("shen_set: expecting a symbol for a key."))
+                                }
+                            })
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
+// Set:1 ends here
+
+// [[file:../shen-rust.org::*Get][Get:1]]
+pub fn shen_value() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | symbol | {
+                SYMBOL_TABLE.with(| symbol_table| {
+                    let map = symbol_table.borrow();
+                    let symbol_string = shen_symbol_to_string(&*symbol);
+                    match symbol_string {
+                        Ok(s) => {
+                            match map.get(*s) {
+                                Some(v) => KlClosure::Done(Ok(Some(v.clone()))),
+                                None => KlClosure::Done(shen_make_error(&*(format!("variable {} is unbound", (*s)))))
+                            }
+                        },
+                        _ => return KlClosure::Done(shen_make_error("shen_value: expecting a symbol for a key."))
+                    }
+                })
+            }
+        )
+    )
+}
+// Get:1 ends here
 
 // [[file:../shen-rust.org::*Cons][Cons:1]]
 pub fn shen_cons() -> KlClosure {
@@ -968,6 +1234,303 @@ pub fn shen_absvectorp() -> KlClosure {
     )
 }
 // absvector\?:1 ends here
+
+// [[file:../shen-rust.org::*write-byte][write-byte:1]]
+pub fn shen_write_byte () -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | to_write | {
+                KlClosure::FeedMe(
+                    Rc::new(
+                        move | stream | {
+                            let byte = to_write.clone();
+                            match &*byte {
+                                &KlElement::Number(KlNumber::Int(i)) => {
+                                    let converted = TryFrom::try_from(i);
+                                    match converted {
+                                        Ok(byte) => {
+                                            match *stream {
+                                                KlElement::Stream(ref stream) => {
+                                                    let stream : &KlStream = &*stream;
+                                                    match stream {
+                                                        &KlStream::FileStream(KlFileStream { direction: KlStreamDirection::Out, file: ref handle }) => {
+                                                            let mut file = (*handle).borrow_mut();
+                                                            let written = file.write(&[byte]);
+                                                            match written {
+                                                                Ok(_) => KlClosure::Done(Ok(Some(to_write.clone()))),
+                                                                Err(_) => KlClosure::Done(shen_make_error("shen_write_byte: Could not write byte to file."))
+                                                            }
+                                                        },
+                                                        &KlStream::Std(KlStdStream::Stdout) => {
+                                                            let written = io::stdout().write(&[byte]);
+                                                            match written {
+                                                                Ok(_) => KlClosure::Done(Ok(Some(to_write.clone()))),
+                                                                Err(_) => KlClosure::Done(shen_make_error("shen_write_byte: Could not write byte to stdout."))
+                                                            }
+                                                        }
+                                                        _ => KlClosure::Done(shen_make_error("shen_write_byte: Expecting a write-only stream or stdout."))
+                                                    }
+                                                },
+                                                _ => KlClosure::Done(shen_make_error("shen_write_byte: Expecting a stream."))
+                                            }
+                                        },
+                                        Err(_) => KlClosure::Done(shen_make_error("shen_write_byte: Expecting a byte."))
+                                    }
+                                },
+                                _ => KlClosure::Done(shen_make_error("shen_write_byte: Expecting a number."))
+                            }
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
+// write-byte:1 ends here
+
+// [[file:../shen-rust.org::*read-byte][read-byte:1]]
+pub fn shen_read_byte () -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            move | stream | {
+                match *stream {
+                    KlElement::Stream(ref stream) => {
+                        let stream : &KlStream = &*stream;
+                        let mut buffer = [0; 1];
+                        let read = match stream {
+                            &KlStream::FileStream(KlFileStream { direction: KlStreamDirection::In, file: ref handle }) => {
+                                let mut file = (*handle).borrow_mut();
+                                let mut buffer = [0;1];
+                                file.read(&mut buffer[..])
+                            },
+                            &KlStream::Std(KlStdStream::Stdin) => {
+                                io::stdin().read(&mut buffer[..])
+                            }
+                            _ => Err(Error::new(std::io::ErrorKind::Other, "shen_write_byte: Expecting a write-only stream or stdout."))
+                        };
+                        match read {
+                            Ok(_) => {
+                                let read : Result<i64,_> = TryFrom::try_from(buffer[0]);
+                                match read {
+                                    Ok(i) => KlClosure::Done(Ok(Some(Rc::new(KlElement::Number(KlNumber::Int(i)))))),
+                                    Err(_) => KlClosure::Done(shen_make_error("shen_read_byte: Could not read a byte."))
+                                }
+                            },
+                            Err(_) => KlClosure::Done(shen_make_error("shen_write_byte: Could not read byte."))
+                        }
+
+                    },
+                    _ => KlClosure::Done(shen_make_error("shen_write_byte: Expecting a stream."))
+                }
+            }
+        )
+    )
+}
+// read-byte:1 ends here
+
+// [[file:../shen-rust.org::*Open][Open:1]]
+pub fn shen_open() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | file_name | {
+                KlClosure::FeedMe(
+                    Rc::new(
+                        move | direction | {
+                            let file_name = file_name.clone();
+                            match &*file_name {
+                                &KlElement::String(ref path) => {
+                                    let path = path.as_str();
+                                    match &*direction {
+                                        &KlElement::Symbol(ref direction) if direction.as_str() == "in" => {
+                                            match File::open(path) {
+                                                Ok(f) =>
+                                                    KlClosure::Done(
+                                                        Ok(Some(Rc::new(KlElement::Stream(Rc::new(
+                                                            KlStream::FileStream(
+                                                                KlFileStream {
+                                                                    direction: KlStreamDirection::In,
+                                                                    file: RefCell::new(f)}))))))),
+                                                _ => KlClosure::Done(shen_make_error("shen_open: Could not open file."))
+                                            }
+                                        },
+                                        _ => KlClosure::Done(shen_make_error("shen_open: Expecting direction 'in'."))
+                                    }
+                                },
+                                _ => KlClosure::Done(shen_make_error("shen_open: Expecting a file path."))
+                            }
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
+// Open:1 ends here
+
+// [[file:../shen-rust.org::*get-time][get-time:1]]
+pub fn shen_get_time() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | time_type | {
+                match &*time_type {
+                    &KlElement::Symbol(ref s) if s.as_str() == "run" || s.as_str() == "real" => {
+                        KlClosure::Done(Ok(Some(Rc::new(KlElement::Number(KlNumber::Float(time::precise_time_s()))))))
+                    }
+                    _ => KlClosure::Done(shen_make_error("shen_open: Expecting 'run' or 'real'."))
+                }
+            }
+        )
+    )
+}
+// get-time:1 ends here
+
+// [[file:../shen-rust.org::*Macros][Macros:1]]
+macro_rules! number_op {
+    ($a:ident, $b:ident, $checked_op:ident, $float_op:ident, $fn_name:expr, $op_name:expr) => {
+        KlClosure::FeedMe(
+            Rc::new(
+                | $a | {
+                    KlClosure::FeedMe(
+                        Rc::new(
+                            move | $b | {
+                                let $a = $a.clone();
+                                match (&*$a, &*$b) {
+                                    (&KlElement::Number(KlNumber::Int(a)), &KlElement::Number(KlNumber::Int(b))) => {
+                                        match a.$checked_op(b) {
+                                            Some(i) => KlClosure::Done(Ok(Some(Rc::new(KlElement::Number(KlNumber::Int(i.clone())))))),
+                                            _ =>
+                                                KlClosure::Done(shen_make_error(format!("{}: {} would cause overflow.", $fn_name, $op_name).as_str()))
+                                        }
+                                    },
+                                    (&KlElement::Number(KlNumber::Float(a)), &KlElement::Number(KlNumber::Int(b))) => {
+                                        KlClosure::Done(Ok(Some(Rc::new(KlElement::Number(KlNumber::Float(a.$float_op(b as f64)))))))
+                                    }
+                                    (&KlElement::Number(KlNumber::Int(a)), &KlElement::Number(KlNumber::Float(b))) => {
+                                        KlClosure::Done(Ok(Some(Rc::new(KlElement::Number(KlNumber::Float((a as f64).$float_op(b)))))))
+                                    }
+                                    (&KlElement::Number(KlNumber::Float(a)), &KlElement::Number(KlNumber::Float(b))) => {
+                                        KlClosure::Done(Ok(Some(Rc::new(KlElement::Number(KlNumber::Float(a.$float_op(b)))))))
+                                    }
+                                    _ => KlClosure::Done(shen_make_error(format!("{}: expecting two numbers.", $fn_name).as_str()))
+                                }
+                            }
+                        )
+                    )
+                }
+            )
+        )
+    }
+}
+
+macro_rules! number_test {
+    ($a:ident, $b:ident, $test:ident, $fn_name:expr) => {
+        KlClosure::FeedMe(
+            Rc::new(
+                | $a | {
+                    KlClosure::FeedMe(
+                        Rc::new(
+                            move | $b | {
+                                let $a = $a.clone();
+                                let test_result =
+                                    match (&*$a, &*$b) {
+                                        (&KlElement::Number(KlNumber::Int(a)), &KlElement::Number(KlNumber::Int(b))) => Some($test(a,&b)),
+                                        (&KlElement::Number(KlNumber::Float(a)), &KlElement::Number(KlNumber::Int(b))) => Some($test(a,&(b as f64))),
+                                        (&KlElement::Number(KlNumber::Int(a)), &KlElement::Number(KlNumber::Float(b))) => Some($test((a as f64), &b)),
+                                        (&KlElement::Number(KlNumber::Float(a)), &KlElement::Number(KlNumber::Float(b))) => Some($test(a,&b)),
+                                        _ => None
+                                    };
+                                match test_result {
+                                    Some(true) => KlClosure::Done(Ok(Some(shen_string_to_symbol("true")))),
+                                    Some(false) => KlClosure::Done(Ok(Some(shen_string_to_symbol("false")))),
+                                    None => KlClosure::Done(shen_make_error(format!("{}: expecting two numbers.", $fn_name).as_str()))
+                                }
+                            }
+                        )
+                    )
+                }
+            )
+        )
+    }
+}
+// Macros:1 ends here
+
+// [[file:../shen-rust.org::*Helpers][Helpers:1]]
+pub fn shen_le_shim<T: PartialEq + PartialOrd>(a: T, b: &T) -> bool {
+    a.le(&b)
+}
+pub fn shen_ge_shim<T: PartialEq + PartialOrd>(a: T, b: &T) -> bool {
+    a.ge(&b)
+}
+pub fn shen_eq_ge_shim<T: PartialEq + PartialOrd>(a: T, b: &T) -> bool {
+    a.ge(&b) || a.eq(&b)
+}
+pub fn shen_eq_le_shim<T: PartialEq + PartialOrd>(a: T, b: &T) -> bool {
+    a.le(&b) || a.eq(&b)
+}
+// Helpers:1 ends here
+
+// [[file:../shen-rust.org::*+][+:1]]
+pub fn shen_plus() -> KlClosure {
+    number_op!(number_a, number_b, checked_add, add, "shen_plus", "adding")
+}
+// +:1 ends here
+
+// [[file:../shen-rust.org::**][*:1]]
+pub fn shen_mul() -> KlClosure {
+    number_op!(number_a, number_b, checked_mul, mul, "shen_mul", "multiplying")
+}
+// *:1 ends here
+
+// [[file:../shen-rust.org::*-][-:1]]
+pub fn shen_sub() -> KlClosure {
+    number_op!(number_a, number_b, checked_sub, sub, "shen_sub", "subtracting")
+}
+// -:1 ends here
+
+// [[file:../shen-rust.org::*/][/:1]]
+pub fn shen_div() -> KlClosure {
+    number_op!(number_a, number_b, checked_div, div, "shen_div", "dividing")
+}
+// /:1 ends here
+
+// [[file:../shen-rust.org::*>][>:1]]
+pub fn shen_ge() -> KlClosure {
+    number_test!(number_a, number_b, shen_ge_shim, "shen_ge")
+}
+// >:1 ends here
+
+// [[file:../shen-rust.org::*<][<:1]]
+pub fn shen_le() -> KlClosure {
+    number_test!(number_a, number_b, shen_le_shim, "shen_le")
+}
+// <:1 ends here
+
+// [[file:../shen-rust.org::*>=][>=:1]]
+pub fn shen_eq_le() -> KlClosure {
+    number_test!(number_a, number_b, shen_eq_le_shim, "shen_le")
+}
+// >=:1 ends here
+
+// [[file:../shen-rust.org::*<=][<=:1]]
+pub fn shen_eq_ge() -> KlClosure {
+    number_test!(number_a, number_b, shen_eq_ge_shim, "shen_le")
+}
+// <=:1 ends here
+
+// [[file:../shen-rust.org::*number?][number\?:1]]
+pub fn shen_numberp() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | number | {
+                match &*number {
+                    &KlElement::Number(_) => KlClosure::Done(Ok(Some(shen_string_to_symbol("true")))),
+                    _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("false"))))
+                }
+            }
+        )
+    )
+}
+// number\?:1 ends here
 
 // [[file:../shen-rust.org::*KLambda%20Files][KLambda\ Files:1]]
 const KLAMBDAFILES: &'static [ &'static str ] = &[
