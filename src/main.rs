@@ -76,6 +76,7 @@ pub enum KlError {
     ErrorString(String)
 }
 
+#[derive(Clone)]
 pub enum KlClosure {
     FeedMe(Rc<Fn(Rc<KlElement>) -> KlClosure>),
     Thunk(Rc<Fn() -> Rc<KlElement>>),
@@ -1591,28 +1592,75 @@ const KLAMBDAFILES: &'static [ &'static str ] = &[
 // KLambda\ Files:1 ends here
 
 // [[file:../shen-rust.org::*KLambda%20Files][KLambda\ Files:2]]
+pub fn shen_apply_arguments(function: &str, elements: Vec<Rc<KlElement>>) -> Rc<KlElement> {
+    FUNCTION_TABLE.with(| function_table | {
+        let function_table = function_table.borrow();
+        println!("{:?}", function);
+        let function = function_table.get(function).unwrap();
+        let mut so_far = (*function).clone();
+        for e in elements.as_slice() {
+            match so_far {
+                KlClosure::FeedMe(f) =>
+                    so_far = (&f)((*e).clone()),
+                _ => panic!("aargh")
+            }
+        }
+        Rc::new(KlElement::Closure(so_far))
+    })
+}
+
 fn main () {
     shen_fill_function_table();
-    let with_klambda_path : Vec<String> = KLAMBDAFILES
-        .into_iter()
-        .map(|f| {"KLambda/".to_string() + f})
-        .collect();
-    for f in with_klambda_path {
-        let path = Path::new(&f);
-        let mut kl : Vec<Vec<KlToken>>= Vec::new();
-        match File::open(path) {
-            Ok(mut f) => {
-                let mut buffer : Vec<u8> = Vec::new();
-                match f.read_to_end(&mut buffer) {
-                    Ok(_) => {
-                        collect_sexps(&buffer, &mut kl);
-                        println!("{:?}", kl);
-                    },
-                    Err(e) => panic!("error: {:?}", e)
-                }
-            },
-            Err(e) => panic!("error: {:?}", e)
-        }
-    }
+    // (shen/set '*home-directory* "")
+    //     (shen/set '*stoutput* standard-output)
+    //     (shen/set '*stinput* [()])
+    //     (shen/set '*language* "Elisp")
+    //     (shen/set '*implementation* "Elisp")
+    //     (shen/set '*porters* "Aditya Siram")
+    //     (shen/set '*release* "0.0.0.1")
+    //     (shen/set '*port* 1.7)
+    //     (shen/set '*os* "Linux")
+    shen_apply_arguments("set", vec![Rc::new(KlElement::Symbol(String::from("*language*"))), Rc::new(KlElement::String(String::from("Rust")))]);
+    let res = shen_apply_arguments("value", vec![Rc::new(KlElement::Symbol(String::from("*language*")))]);
+    match &*res {
+        &KlElement::Closure(KlClosure::Done(Ok(Some(ref e)))) => {
+            match &**e {
+                &KlElement::String(ref s) => println!("{:?}", s.as_str()),
+                _ => panic!("string")
+            }
+        },
+        _ => panic!("closure")
+    };
+    let res = shen_apply_arguments("+", vec![Rc::new(KlElement::Number(KlNumber::Int(1))), Rc::new(KlElement::Number(KlNumber::Float(2.22)))]);
+    match &*res {
+        &KlElement::Closure(KlClosure::Done(Ok(Some(ref e)))) => {
+            match &**e {
+                &KlElement::Number(KlNumber::Float(f)) => println!("{:?}", f.to_string()),
+                _ => panic!("number")
+            }
+        },
+        _ => panic!("closure")
+    };
+    // let with_klambda_path : Vec<String> = KLAMBDAFILES
+    //     .into_iter()
+    //     .map(|f| {"KLambda/".to_string() + f})
+    //     .collect();
+    // for f in with_klambda_path {
+    //     let path = Path::new(&f);
+    //     let mut kl : Vec<Vec<KlToken>>= Vec::new();
+    //     match File::open(path) {
+    //         Ok(mut f) => {
+    //             let mut buffer : Vec<u8> = Vec::new();
+    //             match f.read_to_end(&mut buffer) {
+    //                 Ok(_) => {
+    //                     collect_sexps(&buffer, &mut kl);
+    //                     println!("{:?}", kl);
+    //                 },
+    //                 Err(e) => panic!("error: {:?}", e)
+    //             }
+    //         },
+    //         Err(e) => panic!("error: {:?}", e)
+    //     }
+    // }
 }
 // KLambda\ Files:2 ends here
