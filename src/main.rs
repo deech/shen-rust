@@ -1,5 +1,5 @@
 // [[file:../shen-rust.org::*Preamble][Preamble:1]]
-#![feature(slice_patterns)]
+#![feature(slice_patterns, advanced_slice_patterns)]
 #![feature(custom_derive)]
 #![feature(try_from)]
 #[macro_use]
@@ -19,48 +19,47 @@ use uuid::Uuid;
 use std::io::{self, Error};
 use std::convert::TryFrom;
 use std::ops::{Add, Sub, Mul, Div};
+use std::fmt;
 // Preamble:1 ends here
 
 // [[file:../shen-rust.org::*Token%20Types][Token\ Types:1]]
-#[derive(Debug)]
-pub enum KlToken {
-    Symbol(String),
-    Number(KlNumber),
-    String(String),
-    Sexp(Vec<KlToken>),
-}
-
 #[derive(Debug)]
 pub enum KlNumber {
     Float(f64),
     Int(i64),
 }
 
+#[derive(Debug)]
 pub struct UniqueVector {
     uuid: Uuid,
     vector: RefCell<Vec<Rc<KlElement>>>
 }
 
+#[derive(Debug)]
 pub enum KlStreamDirection {
     In,
     Out
 }
 
+#[derive(Debug)]
 pub struct KlFileStream {
     direction : KlStreamDirection,
     file: RefCell<File>
 }
 
+#[derive(Debug)]
 pub enum KlStdStream {
     Stdout,
     Stdin
 }
 
+#[derive(Debug)]
 pub enum KlStream {
     FileStream(KlFileStream),
     Std(KlStdStream)
 }
 
+#[derive(Debug)]
 pub enum KlElement {
     Symbol(String),
     Number(KlNumber),
@@ -82,7 +81,159 @@ pub enum KlClosure {
     Thunk(Rc<Fn() -> Rc<KlElement>>),
     Done(Result<Option<Rc<KlElement>>,Rc<KlError>>)
 }
+impl fmt::Debug for KlClosure {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &KlClosure::Done(_) => write!(f, "Saturated"),
+            &KlClosure::Thunk(_) => write!(f, "Thunk"),
+            &KlClosure::FeedMe(_) => write!(f, "Unsaturated"),
+        }
+    }
+}
 // Token\ Types:1 ends here
+
+// [[file:../shen-rust.org::*Symbol%20Table][Symbol\ Table:1]]
+thread_local!(static SYMBOL_TABLE: RefCell<HashMap<String, Rc<KlElement>>> = RefCell::new(HashMap::new()));
+// Symbol\ Table:1 ends here
+
+// [[file:../shen-rust.org::*Function%20Table][Function\ Table:1]]
+thread_local!(static FUNCTION_TABLE: RefCell<HashMap<String, KlClosure>> = RefCell::new(HashMap::new()));
+// Function\ Table:1 ends here
+
+// [[file:../shen-rust.org::*Vector%20Table][Vector\ Table:1]]
+thread_local!(static VECTOR_TABLE: RefCell<Vec<(Rc<UniqueVector>, RefCell<Vec<usize>>)>> = RefCell::new(Vec::new()));
+
+pub fn shen_with_unique_vector (unique_vector: &UniqueVector, tx: Box<Fn(&RefCell<Vec<usize>>) -> ()>)
+                                -> Option<()> {
+    VECTOR_TABLE.with(| vector_table | {
+        let vector_table = vector_table.borrow_mut();
+        let mut iter = vector_table.iter().take_while(| &tuple | {
+            match tuple {
+                &(ref vector,_) => {
+                    let uuid = vector.uuid;
+                    uuid != unique_vector.uuid
+                }
+            }
+        }).peekable();
+        let found : Option<&&(Rc<UniqueVector>, RefCell<Vec<usize>>)> = iter.peek();
+        match found {
+            Some(&&(_, ref indices)) => Some(tx(indices)),
+            None => None
+        }
+    })
+}
+// Vector\ Table:1 ends here
+
+// [[file:../shen-rust.org::*Symbol%20Character%20Rename%20Table][Symbol\ Character\ Rename\ Table:1]]
+thread_local!(static SYMBOL_CHAR_RENAME_TABLE: HashMap<char, &'static str> = {
+    let mut rename_table = HashMap::new();
+    rename_table.insert('=', "Equal");
+    rename_table.insert('-', "Dash");
+    rename_table.insert('*', "Star");
+    rename_table.insert('/', "Slash");
+    rename_table.insert('+', "Plus");
+    rename_table.insert('?', "Question");
+    rename_table.insert('$', "Dollar");
+    rename_table.insert('!', "Bang");
+    rename_table.insert('@', "At");
+    rename_table.insert('~', "Tilde");
+    rename_table.insert('.', "Dot");
+    rename_table.insert('>', "GT");
+    rename_table.insert('<', "LT");
+    rename_table.insert('&', "And");
+    rename_table.insert('%', "Percent");
+    rename_table.insert('\'', "Tick");
+    rename_table.insert('#', "Hash");
+    rename_table.insert('`', "BackTick");
+    rename_table.insert(';', "Semi");
+    rename_table.insert(':', "Colon");
+    rename_table.insert('{', "CurlyL");
+    rename_table.insert('}', "CurlyR");
+    rename_table
+});
+// Symbol\ Character\ Rename\ Table:1 ends here
+
+// [[file:../shen-rust.org::*Symbol%20Keyword%20Rename%20Table][Symbol\ Keyword\ Rename\ Table:1]]
+thread_local!(static SYMBOL_KEYWORD_RENAME_TABLE: HashMap<&'static str, &'static str> = {
+    let mut keyword_rename_table = HashMap::new();
+    keyword_rename_table.insert("abstract" ,"shen_abstract");
+    keyword_rename_table.insert("alignof"  ,"shen_alignof");
+    keyword_rename_table.insert("as"       ,"shen_as");
+    keyword_rename_table.insert("become"   ,"shen_become");
+    keyword_rename_table.insert("box"      ,"shen_box");
+    keyword_rename_table.insert("break"    ,"shen_break");
+    keyword_rename_table.insert("const"    ,"shen_const");
+    keyword_rename_table.insert("continue" ,"shen_continue");
+    keyword_rename_table.insert("crate"    ,"shen_crate");
+    keyword_rename_table.insert("do"       ,"shen_do");
+    keyword_rename_table.insert("else"     ,"shen_else");
+    keyword_rename_table.insert("enum"     ,"shen_enum");
+    keyword_rename_table.insert("extern"   ,"shen_extern");
+    keyword_rename_table.insert("false"    ,"shen_false");
+    keyword_rename_table.insert("final"    ,"shen_final");
+    keyword_rename_table.insert("fn"       ,"shen_fn");
+    keyword_rename_table.insert("for"      ,"shen_for");
+    keyword_rename_table.insert("if"       ,"shen_if");
+    keyword_rename_table.insert("impl"     ,"shen_impl");
+    keyword_rename_table.insert("in"       ,"shen_in");
+    keyword_rename_table.insert("let"      ,"shen_let");
+    keyword_rename_table.insert("loop"     ,"shen_loop");
+    keyword_rename_table.insert("macro"    ,"shen_macro");
+    keyword_rename_table.insert("match"    ,"shen_match");
+    keyword_rename_table.insert("mod"      ,"shen_mod");
+    keyword_rename_table.insert("move"     ,"shen_move");
+    keyword_rename_table.insert("mut"      ,"shen_mut");
+    keyword_rename_table.insert("offsetof" ,"shen_offsetof");
+    keyword_rename_table.insert("override" ,"shen_override");
+    keyword_rename_table.insert("priv"     ,"shen_priv");
+    keyword_rename_table.insert("proc"     ,"shen_proc");
+    keyword_rename_table.insert("pub"      ,"shen_pub");
+    keyword_rename_table.insert("pure"     ,"shen_pure");
+    keyword_rename_table.insert("ref"      ,"shen_ref");
+    keyword_rename_table.insert("return"   ,"shen_return");
+    keyword_rename_table.insert("Self"     ,"shen_Self");
+    keyword_rename_table.insert("self"     ,"shen_self");
+    keyword_rename_table.insert("sizeof"   ,"shen_sizeof");
+    keyword_rename_table.insert("static"   ,"shen_static");
+    keyword_rename_table.insert("struct"   ,"shen_struct");
+    keyword_rename_table.insert("super"    ,"shen_super");
+    keyword_rename_table.insert("trait"    ,"shen_trait");
+    keyword_rename_table.insert("true"     ,"shen_true");
+    keyword_rename_table.insert("type"     ,"shen_type");
+    keyword_rename_table.insert("typeof"   ,"shen_typeof");
+    keyword_rename_table.insert("unsafe"   ,"shen_unsafe");
+    keyword_rename_table.insert("unsized"  ,"shen_unsized");
+    keyword_rename_table.insert("use"      ,"shen_use");
+    keyword_rename_table.insert("virtual"  ,"shen_virtual");
+    keyword_rename_table.insert("where"    ,"shen_where");
+    keyword_rename_table.insert("while"    ,"shen_while");
+    keyword_rename_table.insert("yield"    ,"shen_yield");
+    keyword_rename_table
+});
+// Symbol\ Keyword\ Rename\ Table:1 ends here
+
+// [[file:../shen-rust.org::*Helpers][Helpers:1]]
+pub fn shen_symbol_renamer(symbol_characters : &Vec<char>) -> String {
+    let symbol : String = symbol_characters.into_iter().cloned().collect();
+    SYMBOL_KEYWORD_RENAME_TABLE.with ( | table | {
+        match table.get(symbol.as_str()) {
+            Some(renamed) => String::from(renamed.clone()),
+            None => {
+                let mut result = String::new();
+                for c in symbol_characters {
+                    SYMBOL_CHAR_RENAME_TABLE.with(| table | {
+                        match table.get(c) {
+                            Some(renamed) => result.push_str(renamed.clone()),
+                            _ => result.push(c.clone())
+                        }
+                    })
+                }
+                result
+            }
+        }
+    })
+}
+// Helpers:1 ends here
 
 // [[file:../shen-rust.org::*Constants][Constants:1]]
 const CHARACTERS: &'static str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ=-*/+_?$!@~.><&%'#`;:{}";
@@ -90,7 +241,7 @@ const DIGITS: &'static str = "0123456789";
 // Constants:1 ends here
 
 // [[file:../shen-rust.org::*Parser][Parser:1]]
-named!(klsymbol<KlToken>,
+named!(klsymbol<KlElement>,
        chain!(
        initial: one_of!(CHARACTERS) ~
        remainder: many0!(
@@ -102,21 +253,21 @@ named!(klsymbol<KlToken>,
        || {
            let mut res : Vec <char> = vec![initial];
            res.extend(remainder);
-           KlToken::Symbol(res.into_iter().collect())
+           KlElement::Symbol(shen_symbol_renamer(&res))
        })
 );
 // Parser:1 ends here
 
 // [[file:../shen-rust.org::*Parsers][Parsers:1]]
-named!(klnumber<KlToken>,
+named!(klnumber<KlElement>,
        alt_complete!(
            chain!(
                n: klfloat,
-               || KlToken::Number(n)
+               || KlElement::Number(n)
            ) |
            chain!(
                n : klint,
-               || KlToken::Number(n)
+               || KlElement::Number(n)
            )
        )
 );
@@ -168,12 +319,12 @@ fn make_int(sign: Option<char>, numbers: Vec<char>) -> i64 {
 // Helpers:1 ends here
 
 // [[file:../shen-rust.org::*Parsers][Parsers:1]]
-named!(klstring<KlToken>,
+named!(klstring<KlElement>,
        chain!(
            char!('\"') ~
            contents:  many0!(klstringinnards) ~
            char!('\"'),
-           || KlToken::String(make_quoted_string(contents))
+           || KlElement::String(make_quoted_string(contents))
        )
 );
 
@@ -253,7 +404,7 @@ macro_rules! many0_until (
 // Many\ Until\ Combinator:1 ends here
 
 // [[file:../shen-rust.org::*Parsers][Parsers:1]]
-named!(klsexps< Vec<KlToken> >,
+named!(klsexps< Vec<KlElement> >,
        many0!(
            chain!(
                opt!(multispace) ~
@@ -264,16 +415,24 @@ named!(klsexps< Vec<KlToken> >,
        )
 );
 
-named!(klsexp<KlToken>,
+named!(klsexp<KlElement>,
        chain!(
            char!('(') ~
            inner: many0_until!(char!(')'), klsexpinnards) ~
            char!(')'),
-           || KlToken::Sexp(inner)
+           || {
+               let mut innards = inner;
+               innards.reverse();
+               let result = innards.into_iter().map(| i | {
+                   Rc::new(i)
+               })
+               .collect();
+               KlElement::Cons(result)
+           }
        )
 );
 
-named!(klsexpinnards<KlToken>,
+named!(klsexpinnards<KlElement>,
        chain!(
            opt!(multispace) ~
            atom: alt_complete!(klsexp|klnumber|klstring|klsymbol) ~
@@ -284,49 +443,18 @@ named!(klsexpinnards<KlToken>,
 // Parsers:1 ends here
 
 // [[file:../shen-rust.org::*Collect][Collect:1]]
-fn collect_sexps(kl: &[u8], kl_buffer: &mut Vec<Vec<KlToken>>) -> () {
+fn collect_sexps(kl: &[u8], kl_buffer: &mut Vec<Vec<KlElement>>) -> () {
     let mut parsed = match klsexps(kl) {
         IResult::Done(_, out) => out,
         IResult::Incomplete(x) => panic!("incomplete: {:?}", x),
         IResult::Error(e) => panic!("error: {:?}", e),
     };
     // remove toplevel strings
-    parsed.retain(|expr| match expr { &KlToken::Sexp(_) => true, _ => false });
+    parsed.retain(|expr| match expr { &KlElement::Cons(_) => true, _ => false });
+    println!("{:?}", get_all_tail_calls(&parsed[0]));
     kl_buffer.push(parsed)
 }
 // Collect:1 ends here
-
-// [[file:../shen-rust.org::*Symbol%20Table][Symbol\ Table:1]]
-thread_local!(static SYMBOL_TABLE: RefCell<HashMap<String, Rc<KlElement>>> = RefCell::new(HashMap::new()));
-// Symbol\ Table:1 ends here
-
-// [[file:../shen-rust.org::*Function%20Table][Function\ Table:1]]
-thread_local!(static FUNCTION_TABLE: RefCell<HashMap<String, KlClosure>> = RefCell::new(HashMap::new()));
-// Function\ Table:1 ends here
-
-// [[file:../shen-rust.org::*Vector%20Table][Vector\ Table:1]]
-thread_local!(static VECTOR_TABLE: RefCell<Vec<(Rc<UniqueVector>, RefCell<Vec<usize>>)>> = RefCell::new(Vec::new()));
-
-pub fn shen_with_unique_vector (unique_vector: &UniqueVector, tx: Box<Fn(&RefCell<Vec<usize>>) -> ()>)
-                                -> Option<()> {
-    VECTOR_TABLE.with(| vector_table | {
-        let vector_table = vector_table.borrow_mut();
-        let mut iter = vector_table.iter().take_while(| &tuple | {
-            match tuple {
-                &(ref vector,_) => {
-                    let uuid = vector.uuid;
-                    uuid != unique_vector.uuid
-                }
-            }
-        }).peekable();
-        let found : Option<&&(Rc<UniqueVector>, RefCell<Vec<usize>>)> = iter.peek();
-        match found {
-            Some(&&(_, ref indices)) => Some(tx(indices)),
-            None => None
-        }
-    })
-}
-// Vector\ Table:1 ends here
 
 // [[file:../shen-rust.org::*Path%20Utilites][Path\ Utilites:1]]
 pub fn add_path (old_path:&Vec<usize>, new_path:Vec<usize>) -> Vec<usize> {
@@ -337,10 +465,10 @@ pub fn add_path (old_path:&Vec<usize>, new_path:Vec<usize>) -> Vec<usize> {
 // Path\ Utilites:1 ends here
 
 // [[file:../shen-rust.org::*Getter][Getter:1]]
-pub fn get_element_at (path : Vec<usize>, sexp: &KlToken)  -> Option<&KlToken> {
+pub fn get_element_at (path : Vec<usize>, sexp: &KlElement)  -> Option<&KlElement> {
     let mut current_token = sexp;
     for index in path {
-        if let &KlToken::Sexp(ref current) = current_token {
+        if let &KlElement::Cons(ref current) = current_token {
             if index < current.len() {
                 current_token = &current[index];
             }
@@ -357,60 +485,75 @@ pub fn get_element_at (path : Vec<usize>, sexp: &KlToken)  -> Option<&KlToken> {
 // Getter:1 ends here
 
 // [[file:../shen-rust.org::*Detect%20Possible%20Recursive%20Calls][Detect\ Possible\ Recursive\ Calls:1]]
-pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlToken) -> Vec<Vec<usize>> {
+pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlElement) -> Vec<Vec<usize>> {
     let mut found : Vec< Vec<usize> >= Vec::new();
-    if let &KlToken::Sexp(_) = sexp {
-        let mut pending : Vec <(Vec<usize>, &KlToken)> = vec![(Vec::new(), sexp)];
+    if let &KlElement::Cons(_) = sexp {
+        let mut pending : Vec <(Vec<usize>, &KlElement)> = vec![(Vec::new(), sexp)];
         while pending.len() > 0 {
             let mut newly_found = Vec::new();
-            if let &mut [(ref path, &KlToken::Sexp(ref current)),_] = pending.as_mut_slice() {
-                if let &[KlToken::Symbol(ref s), ref rest..] = current.as_slice() {
-                    match (s.as_str(), rest) {
-                        (name, rest) if (name == function_name.as_str()) && rest.len() == num_args => {
-                            found.push(path.clone());
-                        },
-                        ("cond", rest) => {
-                            let indexed : Vec<(usize, &KlToken)> = rest.iter().enumerate().collect();
-                            for (index, sexp) in indexed {
-                                if let &KlToken::Sexp(ref pair) = sexp {
-                                    if let &[_, ref action @ KlToken::Sexp(_)] = pair.as_slice() {
-                                        newly_found.push((add_path(path, vec![index,1]), action));
+            if let Some((ref path, &KlElement::Cons(ref current))) = pending.pop() {
+                println!("{:?}", current);
+                if let &[ref rest.., ref symbol] = current.as_slice() {
+                    if let &KlElement::Symbol(ref s) = &**symbol {
+                        match (s.as_str(), rest) {
+                            (name, rest) if (name == function_name.as_str()) && rest.len() == num_args => {
+                                found.push(path.clone());
+                            },
+                            ("cond", rest) => {
+                                let indexed : Vec<(usize, &Rc<KlElement>)> = rest.iter().enumerate().collect();
+                                for &(index, sexp) in indexed.as_slice() {
+                                    if let &KlElement::Cons(ref pair) = &**sexp {
+                                        if let &[ref action,_] = pair.as_slice() {
+                                            if let action @ &KlElement::Cons(_) = &**action {
+                                                newly_found.push((add_path(path, vec![index+1, 1]), action));
+                                            }
+                                        }
                                     }
+                                };
+                            },
+                            ("if", &[ref if_false, ref if_true,_]) => {
+                                if let if_true @ &KlElement::Cons(_) = &**if_true {
+                                    newly_found.push((add_path(path, vec![0]), if_true));
                                 }
-                            };
-                        },
-                        ("if", &[ref if_true @ KlToken::Sexp(_), ref if_false @ KlToken::Sexp(_)]) => {
-                            newly_found.push((add_path(path, vec![2]), if_true));
-                            newly_found.push((add_path(path, vec![3]), if_false));
-                        },
-                        ("trap_error", &[ref to_try @ KlToken::Sexp(_), ref handler @ KlToken::Sexp(_)]) => {
-                            newly_found.push((add_path(path, vec![1]), to_try));
-                            newly_found.push((add_path(path, vec![2]), handler));
-                        },
-                        ("let", &[_ , _, ref body @ KlToken::Sexp(_)]) |
-                        ("defun", &[_ , _, ref body @ KlToken::Sexp(_)]) =>
-                            newly_found.push((add_path(path, vec![3]), body)),
-                        ("lambda", &[_, ref body @ KlToken::Sexp(_)]) =>
-                            newly_found.push((add_path(path, vec![2]), body)),
-                        _ => match current.last() {
-                            Some(ref tail @ &KlToken::Sexp(_)) =>
-                                newly_found.push((add_path(path, vec![current.len() - 1]), tail)),
+                                if let if_false @ &KlElement::Cons(_) = &**if_false {
+                                    newly_found.push((add_path(path, vec![1]), if_false));
+                                }
+                            },
+                            ("trap_error", &[ref handler, ref to_try]) => {
+                                if let handler @ &KlElement::Cons(_) = &**handler {
+                                    newly_found.push((add_path(path, vec![0]), handler));
+                                }
+                                if let to_try @ &KlElement::Cons(_) = &**to_try {
+                                    newly_found.push((add_path(path, vec![1]), to_try));
+                                }
+                            }
+                            ("let", &[ref body,_,_]) |
+                            ("defun", &[ref body,_,_]) =>
+                                if let body @ &KlElement::Cons(_) = &**body {
+                                    newly_found.push((add_path(path, vec![0]), body))
+                                },
+                            ("lambda", &[ref body,_]) =>
+                                if let body @ &KlElement::Cons(_) = &**body {
+                                newly_found.push((add_path(path, vec![0]), body))
+                                },
+                            (_, &[ref body,_]) => {
+                                if let body @ &KlElement::Cons(_) = &**body {
+                                    newly_found.push((add_path(path, vec![current.len() - 1]), body))
+                                }
+                            },
                             _ => ()
                         }
                     }
                 }
                 else {
-                    match current.last() {
-                        Some(ref tail @ &KlToken::Sexp(_)) =>
-                            newly_found.push((add_path(path, vec![current.len() - 1]), tail)),
-                        _ => ()
+                    if let &[ref tail,_] = current.as_slice() {
+                        if let tail @ &KlElement::Cons(_) = &**tail {
+                            newly_found.push((add_path(path, vec![current.len() - 1]), tail))
+                        }
                     }
                 }
             };
-            pending.remove(0);
-            newly_found.reverse();
-            newly_found.extend(pending);
-            pending = newly_found;
+            pending.extend(newly_found)
         }
     }
     found
@@ -418,33 +561,29 @@ pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlTo
 // Detect\ Possible\ Recursive\ Calls:1 ends here
 
 // [[file:../shen-rust.org::*Detect%20Function%20Application%20Context][Detect\ Function\ Application\ Context:1]]
-pub fn start_of_function_chain (tail_call_path: Vec<usize>, sexp: &KlToken) -> Option<Vec<usize>> {
+pub fn start_of_function_chain (tail_call_path: Vec<usize>, sexp: &KlElement) -> Option<Vec<usize>> {
     let mut result = None;
     let mut i = 0;
     while i < tail_call_path.len() {
         let current_path : Vec<usize> = tail_call_path.iter().cloned().take(i).collect();
-        match get_element_at(current_path.clone(), &sexp) {
-            Some(current_element) => {
-                if let &KlToken::Sexp(ref current) = current_element {
-                    match current.as_slice() {
-                        &[KlToken::Symbol(ref s), _] => {
-                            match s.as_str() {
-                                "if" | "defun" | "let" | "lambda" | "do" => {
-                                    result = None;
-                                    i = i + 1;
-                                }
-                                "cond" => {
-                                    result = None;
-                                    i = i + 2;
-                                }
-                                _ => {
-                                    result = Some(current_path.clone());
-                                    i = i + 1
-                                }
-
+        match get_element_at(current_path.clone(), sexp) {
+            Some(&KlElement::Cons(ref current)) => {
+                if let &[ref rest.., ref s] = current.as_slice() {
+                    if let &KlElement::Symbol(ref s) = &**s {
+                        match s.as_str() {
+                            "if" | "defun" | "let" | "lambda" | "do" => {
+                                result = None;
+                                i = i + 1;
+                            }
+                            "cond" => {
+                                result = None;
+                                i = i + 2;
+                            }
+                            _ => {
+                                result = Some(current_path.clone());
+                                i = i + 1
                             }
                         }
-                        _ => ()
                     }
                 }
             },
@@ -456,29 +595,35 @@ pub fn start_of_function_chain (tail_call_path: Vec<usize>, sexp: &KlToken) -> O
 // Detect\ Function\ Application\ Context:1 ends here
 
 // [[file:../shen-rust.org::*Get%20Tail%20Calls][Get\ Tail\ Calls:1]]
-pub fn get_all_tail_calls (sexp: &KlToken) -> Vec<Vec<usize>> {
-    if let &KlToken::Sexp(ref defun) = sexp {
+pub fn get_all_tail_calls (sexp: &KlElement) -> Vec<Vec<usize>> {
+    let mut result = Vec::new();
+    if let &KlElement::Cons(ref defun) = sexp {
         match defun.as_slice() {
-            &[KlToken::Symbol(ref defun), KlToken::Symbol(ref name), KlToken::Sexp(ref args), _]
-                if defun.as_str() == "defun" => {
-                    let mut recursive_calls = find_recursive_calls(name.clone(), args.len(), sexp);
-                    recursive_calls.retain(
-                        |ref path| {
-                            let context = start_of_function_chain(path.iter().cloned().collect(), sexp);
-                            match context {
-                                Some(_) => false,
-                                None => true
+            &[_, ref args, ref name, ref defun] => {
+                if let &KlElement::Symbol(ref s) = &**defun {
+                    if s.as_str() == "defun" {
+                        if let &KlElement::Symbol(ref name) = &**name {
+                            if let &KlElement::Cons(ref args) = &**args {
+                                let mut recursive_calls = find_recursive_calls(name.clone(), args.len(), sexp);
+                                recursive_calls.retain(
+                                    |ref path| {
+                                        let context = start_of_function_chain(path.iter().cloned().collect(), sexp);
+                                        match context {
+                                            Some(_) => false,
+                                            None => true
+                                        }
+                                    }
+                                );
+                                result = recursive_calls
                             }
                         }
-                    );
-                    recursive_calls
-                },
-            _ => Vec::new()
+                    }
+                 }
+            },
+            _ => ()
         }
     }
-    else {
-        Vec::new()
-    }
+    result
 }
 // Get\ Tail\ Calls:1 ends here
 
@@ -496,7 +641,7 @@ pub fn shen_string_to_symbol(s : &str) -> Rc<KlElement> {
 
 pub fn shen_is_bool (a: Rc<KlElement>) -> bool {
     match &*a {
-        &KlElement::Symbol(ref s) if s.as_str() == "true" || s.as_str() == "false" => true,
+        &KlElement::Symbol(ref s) if s.as_str() == "shen_true" || s.as_str() == "shen_false" => true,
         _ => false
     }
 }
@@ -517,6 +662,45 @@ pub fn shen_force_thunk(a : Rc<KlElement>) -> Result<Option<Rc<KlElement>>,Rc<Kl
 
 pub fn shen_make_error(s : &str) -> Result<Option<Rc<KlElement>>, Rc<KlError>> {
     Err(Rc::new((KlError::ErrorString(String::from(s)))))
+}
+
+pub fn shen_atoms_equal(a: Rc<KlElement>, b: Rc<KlElement>) -> Result<bool, (Vec<Rc<KlElement>>, Vec<Rc<KlElement>>)> {
+    match (&*a, &*b) {
+        (&KlElement::Symbol(ref i), &KlElement::Symbol(ref j)) if (*i).as_str() == (*j).as_str() => Ok(true),
+        (&KlElement::Number(KlNumber::Int(i)), &KlElement::Number(KlNumber::Int(j))) if i == j => Ok(true),
+        (&KlElement::Number(KlNumber::Float(i)), &KlElement::Number(KlNumber::Float(j))) if i == j => Ok(true),
+        (&KlElement::String(ref i), &KlElement::String(ref j)) if (*i).as_str() == (*j).as_str() => Ok(true),
+        (&KlElement::Cons(ref i), &KlElement::Cons(ref j)) => Err(((*i).clone(),(*j).clone())),
+        (&KlElement::Vector(ref i), &KlElement::Vector(ref j)) =>
+            match (&**i,&**j) {
+                (&UniqueVector{uuid: _, vector: ref i}, &UniqueVector{ uuid: _, vector: ref j}) =>
+                    Err((i.borrow().clone(),j.borrow().clone()))
+            },
+        _ => Ok(false)
+    }
+}
+
+pub fn shen_vector_equal(a: &Vec<Rc<KlElement>>, b: &Vec<Rc<KlElement>>) -> bool {
+    let mut inner_vectors : Vec<(Rc<KlElement>, Rc<KlElement>)>=
+        (*a).clone().into_iter().zip((*b).clone().into_iter()).collect();
+    let mut still_equal = (*a).len() == (*b).len();
+    let mut next = inner_vectors.pop();
+    while still_equal && next.is_some() {
+        let (a,b) = next.unwrap();
+        match shen_atoms_equal(a,b) {
+            Ok(equal_or_not) => {
+                still_equal = equal_or_not;
+            },
+            Err((i,j))=> {
+                let new_inner_vector : Vec<(Rc<KlElement>, Rc<KlElement>)> =
+                    i.clone().into_iter().zip(j.clone().into_iter()).collect();
+                inner_vectors.extend(new_inner_vector.clone());
+                still_equal = (*i).len() == (*j).len();
+            }
+        }
+        next = inner_vectors.pop();
+    }
+    still_equal
 }
 // Helpers:1 ends here
 
@@ -541,10 +725,10 @@ pub fn shen_if () -> KlClosure {
                                             }
                                             else {
                                                 match *predicate {
-                                                    KlElement::Symbol(ref s) if s.as_str() == "true" => {
+                                                    KlElement::Symbol(ref s) if s.as_str() == "shen_true" => {
                                                         KlClosure::Done(shen_force_thunk(if_thunk.clone()))
                                                     },
-                                                    KlElement::Symbol(ref s) if s.as_str() == "false" => {
+                                                    KlElement::Symbol(ref s) if s.as_str() == "shen_false" => {
                                                         KlClosure::Done(shen_force_thunk(else_thunk.clone()))
                                                     },
                                                     _ => KlClosure::Done(shen_make_error("Expecting predicate to be 'true' or 'false'."))
@@ -583,8 +767,8 @@ pub fn shen_and () -> KlClosure {
                                     let forced : Rc<KlElement> = forced.unwrap();
                                     match &*forced {
                                         &KlElement::Symbol(ref a)
-                                            if a.as_str() == "false" =>
-                                            KlClosure::Done(Ok(Some(shen_string_to_symbol("false")))),
+                                            if a.as_str() == "shen_false" =>
+                                            KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_false")))),
                                         _ => {
                                             let forced = shen_force_thunk(b_thunk).unwrap();
                                             if forced.is_some() && !shen_is_bool(forced.clone().unwrap()) {
@@ -594,9 +778,9 @@ pub fn shen_and () -> KlClosure {
                                                 let forced = forced.unwrap();
                                                 match &*forced {
                                                     &KlElement::Symbol(ref b)
-                                                        if b.as_str() == "false" =>
-                                                        KlClosure::Done(Ok(Some(shen_string_to_symbol("false")))),
-                                                    _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("true"))))
+                                                        if b.as_str() == "shen_false" =>
+                                                        KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_false")))),
+                                                    _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_true"))))
                                                 }
                                             }
                                         }
@@ -632,8 +816,8 @@ pub fn shen_or () -> KlClosure {
                                     let forced : Rc<KlElement> = forced.unwrap();
                                     match &*forced {
                                         &KlElement::Symbol(ref a)
-                                            if a.as_str() == "true" =>
-                                            KlClosure::Done(Ok(Some(shen_string_to_symbol("true")))),
+                                            if a.as_str() == "shen_true" =>
+                                            KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_true")))),
                                         _ => {
                                             let forced = shen_force_thunk(b_thunk).unwrap();
                                             if forced.is_some() && !shen_is_bool(forced.clone().unwrap()) {
@@ -643,9 +827,9 @@ pub fn shen_or () -> KlClosure {
                                                 let forced = forced.unwrap();
                                                 match &*forced {
                                                     &KlElement::Symbol(ref b)
-                                                        if b.as_str() == "true" =>
-                                                        KlClosure::Done(Ok(Some(shen_string_to_symbol("true")))),
-                                                    _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("false"))))
+                                                        if b.as_str() == "shen_true" =>
+                                                        KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_true")))),
+                                                    _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_false"))))
                                                 }
                                             }
                                         }
@@ -693,7 +877,7 @@ pub fn shen_cond() -> KlClosure {
                             else {
                                 let forced = forced.unwrap();
                                 match &*forced {
-                                    &KlElement::Symbol(ref s) if s.as_str() == "true" => {
+                                    &KlElement::Symbol(ref s) if s.as_str() == "shen_true" => {
                                         let forced = shen_force_thunk(action.clone()).unwrap();
                                         result = Some(KlClosure::Done(Ok(forced)));
                                     },
@@ -853,8 +1037,8 @@ pub fn shen_stringp() -> KlClosure {
             | element | {
                 match &*element {
                     &KlElement::String(_) =>
-                        KlClosure::Done(Ok(Some(shen_string_to_symbol("true")))),
-                    _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("false"))))
+                        KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_true")))),
+                    _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_false"))))
                 }
             }
         )
@@ -1111,14 +1295,41 @@ pub fn shen_consp() -> KlClosure {
         Rc::new(
             | list | {
                 match *list {
-                    KlElement::Cons(_) => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("true")))))),
-                    _ => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("false"))))))
+                    KlElement::Cons(_) => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("shen_true")))))),
+                    _ => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("shen_false"))))))
                 }
             }
         )
     )
 }
 // Cons\?:1 ends here
+
+// [[file:../shen-rust.org::*=][=:1]]
+pub fn shen_equal() -> KlClosure {
+    KlClosure::FeedMe(
+        Rc::new(
+            | a | {
+                KlClosure::FeedMe(
+                    Rc::new(
+                        move | b | {
+                            let a = a.clone();
+                            let is_equal =
+                                match shen_atoms_equal(a,b) {
+                                    Ok(equal) => equal,
+                                    Err((ref v1, ref v2)) => shen_vector_equal(v1,v2)
+                                };
+                            KlClosure::Done(
+                                Ok(Some((shen_string_to_symbol(
+                                    if is_equal {"shen_true"} else {"shen_false"}))))
+                            )
+                        }
+                    )
+                )
+            }
+        )
+    )
+}
+// =:1 ends here
 
 // [[file:../shen-rust.org::*absvector][absvector:1]]
 pub fn shen_absvector() -> KlClosure {
@@ -1231,8 +1442,8 @@ pub fn shen_absvectorp() -> KlClosure {
         Rc::new(
             | vector | {
                 match &*vector {
-                    &KlElement::Vector(_) => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("true")))))),
-                    _ => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("false")))))),
+                    &KlElement::Vector(_) => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("shen_true")))))),
+                    _ => KlClosure::Done(Ok(Some(Rc::new(KlElement::Symbol(String::from("shen_false")))))),
                 }
             }
         )
@@ -1445,8 +1656,8 @@ macro_rules! number_test {
                                         _ => None
                                     };
                                 match test_result {
-                                    Some(true) => KlClosure::Done(Ok(Some(shen_string_to_symbol("true")))),
-                                    Some(false) => KlClosure::Done(Ok(Some(shen_string_to_symbol("false")))),
+                                    Some(true) => KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_true")))),
+                                    Some(false) => KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_false")))),
                                     None => KlClosure::Done(shen_make_error(format!("{}: expecting two numbers.", $fn_name).as_str()))
                                 }
                             }
@@ -1528,8 +1739,8 @@ pub fn shen_numberp() -> KlClosure {
         Rc::new(
             | number | {
                 match &*number {
-                    &KlElement::Number(_) => KlClosure::Done(Ok(Some(shen_string_to_symbol("true")))),
-                    _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("false"))))
+                    &KlElement::Number(_) => KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_true")))),
+                    _ => KlClosure::Done(Ok(Some(shen_string_to_symbol("shen_false"))))
                 }
             }
         )
@@ -1541,53 +1752,58 @@ pub fn shen_numberp() -> KlClosure {
 pub fn shen_fill_function_table() {
     FUNCTION_TABLE.with(| function_table | {
         let mut map = function_table.borrow_mut();
-        map.insert(String::from("if")              ,shen_if());
-        map.insert(String::from("and")             ,shen_and());
-        map.insert(String::from("or")              ,shen_or());
-        map.insert(String::from("cond")            ,shen_cond());
-        map.insert(String::from("intern")          ,shen_intern());
-        map.insert(String::from("pos")             ,shen_pos());
-        map.insert(String::from("tlstr")           ,shen_tlstr());
-        map.insert(String::from("cn")              ,shen_cn());
-        map.insert(String::from("str")             ,shen_str());
-        map.insert(String::from("string?")         ,shen_stringp());
-        map.insert(String::from("n_to_string")     ,shen_n_to_string());
-        map.insert(String::from("string_to_n")     ,shen_string_to_n());
-        map.insert(String::from("simple_error ")   ,shen_simple_error ());
-        map.insert(String::from("trap_error")      ,shen_trap_error());
-        map.insert(String::from("error_to_string") ,shen_error_to_string());
-        map.insert(String::from("set")             ,shen_set());
-        map.insert(String::from("value")           ,shen_value());
-        map.insert(String::from("cons")            ,shen_cons());
-        map.insert(String::from("hd")              ,shen_hd());
-        map.insert(String::from("tl")              ,shen_tl());
-        map.insert(String::from("cons?")           ,shen_consp());
-        map.insert(String::from("absvector")       ,shen_absvector());
-        map.insert(String::from("address->")       ,shen_insert_at_address());
-        map.insert(String::from("<-address")       ,shen_get_at_address());
-        map.insert(String::from("absvectorp")      ,shen_absvectorp());
-        map.insert(String::from("write_byte")      ,shen_write_byte());
-        map.insert(String::from("read_byte")       ,shen_read_byte());
-        map.insert(String::from("open")            ,shen_open());
-        map.insert(String::from("get_time")        ,shen_get_time());
-        map.insert(String::from("+")               ,shen_plus());
-        map.insert(String::from("*")               ,shen_mul());
-        map.insert(String::from("-")               ,shen_sub());
-        map.insert(String::from("/")               ,shen_div());
-        map.insert(String::from(">")               ,shen_ge());
-        map.insert(String::from("<")               ,shen_le());
-        map.insert(String::from("<=")              ,shen_eq_le());
-        map.insert(String::from(">=")              ,shen_eq_ge());
-        map.insert(String::from("number?")         ,shen_numberp());
+        map.insert(String::from("shen_if")               ,shen_if());
+        map.insert(String::from("and")                   ,shen_and());
+        map.insert(String::from("or")                    ,shen_or());
+        map.insert(String::from("cond")                  ,shen_cond());
+        map.insert(String::from("intern")                ,shen_intern());
+        map.insert(String::from("pos")                   ,shen_pos());
+        map.insert(String::from("tlstr")                 ,shen_tlstr());
+        map.insert(String::from("cn")                    ,shen_cn());
+        map.insert(String::from("str")                   ,shen_str());
+        map.insert(String::from("stringQuestion")        ,shen_stringp());
+        map.insert(String::from("nDashGTstring")         ,shen_n_to_string());
+        map.insert(String::from("stringDashGTn")         ,shen_string_to_n());
+        map.insert(String::from("simpleDasherror ")      ,shen_simple_error());
+        map.insert(String::from("trapDasherror")         ,shen_trap_error());
+        map.insert(String::from("errorDashtoDashstring") ,shen_error_to_string());
+        map.insert(String::from("set")                   ,shen_set());
+        map.insert(String::from("value")                 ,shen_value());
+        map.insert(String::from("cons")                  ,shen_cons());
+        map.insert(String::from("hd")                    ,shen_hd());
+        map.insert(String::from("tl")                    ,shen_tl());
+        map.insert(String::from("consQuestion")          ,shen_consp());
+        map.insert(String::from("Equal")                 ,shen_equal());
+        map.insert(String::from("absvector")             ,shen_absvector());
+        map.insert(String::from("addressDashGT")         ,shen_insert_at_address());
+        map.insert(String::from("LTDashaddress")         ,shen_get_at_address());
+        map.insert(String::from("absvectorQuestion")     ,shen_absvectorp());
+        map.insert(String::from("write_byte")            ,shen_write_byte());
+        map.insert(String::from("read_byte")             ,shen_read_byte());
+        map.insert(String::from("open")                  ,shen_open());
+        map.insert(String::from("getDashtime")           ,shen_get_time());
+        map.insert(String::from("Plus")                  ,shen_plus());
+        map.insert(String::from("Star")                  ,shen_mul());
+        map.insert(String::from("Dash")                  ,shen_sub());
+        map.insert(String::from("Slash")                 ,shen_div());
+        map.insert(String::from("GT")                    ,shen_ge());
+        map.insert(String::from("LT")                    ,shen_le());
+        map.insert(String::from("LTEqual")               ,shen_eq_le());
+        map.insert(String::from("GTLEqual")              ,shen_eq_ge());
+        map.insert(String::from("numberQuestion")        ,shen_numberp());
     })
 }
 // Filling\ The\ Function\ Table:1 ends here
 
 // [[file:../shen-rust.org::*KLambda%20Files][KLambda\ Files:1]]
+// const KLAMBDAFILES: &'static [ &'static str ] = &[
+//     "toplevel.kl", "core.kl", "sys.kl", "sequent.kl", "yacc.kl",
+//     "reader.kl", "prolog.kl", "track.kl", "load.kl", "writer.kl",
+//     "macros.kl", "declarations.kl", "types.kl", "t-star.kl"
+// ];
+
 const KLAMBDAFILES: &'static [ &'static str ] = &[
-    "toplevel.kl", "core.kl", "sys.kl", "sequent.kl", "yacc.kl",
-    "reader.kl", "prolog.kl", "track.kl", "load.kl", "writer.kl",
-    "macros.kl", "declarations.kl", "types.kl", "t-star.kl"
+    "test.kl"
 ];
 // KLambda\ Files:1 ends here
 
@@ -1612,14 +1828,14 @@ pub fn shen_apply_arguments(function: &str, elements: Vec<Rc<KlElement>>) -> Rc<
 fn main () {
     shen_fill_function_table();
     // (shen/set '*home-directory* "")
-    //     (shen/set '*stoutput* standard-output)
-    //     (shen/set '*stinput* [()])
-    //     (shen/set '*language* "Elisp")
-    //     (shen/set '*implementation* "Elisp")
-    //     (shen/set '*porters* "Aditya Siram")
-    //     (shen/set '*release* "0.0.0.1")
-    //     (shen/set '*port* 1.7)
-    //     (shen/set '*os* "Linux")
+    // (shen/set '*stoutput* standard-output)
+    // (shen/set '*stinput* [()])
+    // (shen/set '*language* "Elisp")
+    // (shen/set '*implementation* "Elisp")
+    // (shen/set '*porters* "Aditya Siram")
+    // (shen/set '*release* "0.0.0.1")
+    // (shen/set '*port* 1.7)
+    // (shen/set '*os* "Linux")
     shen_apply_arguments("set", vec![Rc::new(KlElement::Symbol(String::from("*language*"))), Rc::new(KlElement::String(String::from("Rust")))]);
     let res = shen_apply_arguments("value", vec![Rc::new(KlElement::Symbol(String::from("*language*")))]);
     match &*res {
@@ -1631,7 +1847,7 @@ fn main () {
         },
         _ => panic!("closure")
     };
-    let res = shen_apply_arguments("+", vec![Rc::new(KlElement::Number(KlNumber::Int(1))), Rc::new(KlElement::Number(KlNumber::Float(2.22)))]);
+    let res = shen_apply_arguments("Plus", vec![Rc::new(KlElement::Number(KlNumber::Int(1))), Rc::new(KlElement::Number(KlNumber::Float(2.22)))]);
     match &*res {
         &KlElement::Closure(KlClosure::Done(Ok(Some(ref e)))) => {
             match &**e {
@@ -1641,26 +1857,26 @@ fn main () {
         },
         _ => panic!("closure")
     };
-    // let with_klambda_path : Vec<String> = KLAMBDAFILES
-    //     .into_iter()
-    //     .map(|f| {"KLambda/".to_string() + f})
-    //     .collect();
-    // for f in with_klambda_path {
-    //     let path = Path::new(&f);
-    //     let mut kl : Vec<Vec<KlToken>>= Vec::new();
-    //     match File::open(path) {
-    //         Ok(mut f) => {
-    //             let mut buffer : Vec<u8> = Vec::new();
-    //             match f.read_to_end(&mut buffer) {
-    //                 Ok(_) => {
-    //                     collect_sexps(&buffer, &mut kl);
-    //                     println!("{:?}", kl);
-    //                 },
-    //                 Err(e) => panic!("error: {:?}", e)
-    //             }
-    //         },
-    //         Err(e) => panic!("error: {:?}", e)
-    //     }
-    // }
+    let with_klambda_path : Vec<String> = KLAMBDAFILES
+        .into_iter()
+        .map(|f| {"KLambda/".to_string() + f})
+        .collect();
+    for f in with_klambda_path {
+        let path = Path::new(&f);
+        let mut kl : Vec<Vec<KlElement>>= Vec::new();
+        match File::open(path) {
+            Ok(mut f) => {
+                let mut buffer : Vec<u8> = Vec::new();
+                match f.read_to_end(&mut buffer) {
+                    Ok(_) => {
+                        collect_sexps(&buffer, &mut kl);
+                        println!("{:?}", kl);
+                    },
+                    Err(e) => panic!("error: {:?}", e)
+                }
+            },
+            Err(e) => panic!("error: {:?}", e)
+        }
+    }
 }
 // KLambda\ Files:2 ends here
