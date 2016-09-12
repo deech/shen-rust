@@ -126,30 +126,57 @@ pub fn shen_with_unique_vector (unique_vector: &UniqueVector, tx: Box<Fn(&RefCel
 
 // [[file:../shen-rust.org::*Symbol%20Character%20Rename%20Table][Symbol\ Character\ Rename\ Table:1]]
 thread_local!(static SYMBOL_CHAR_RENAME_TABLE: HashMap<char, &'static str> = {
-    let mut rename_table = HashMap::new();
-    rename_table.insert('=', "Equal");
-    rename_table.insert('-', "Dash");
-    rename_table.insert('*', "Star");
-    rename_table.insert('/', "Slash");
-    rename_table.insert('+', "Plus");
-    rename_table.insert('?', "Question");
-    rename_table.insert('$', "Dollar");
-    rename_table.insert('!', "Bang");
-    rename_table.insert('@', "At");
-    rename_table.insert('~', "Tilde");
-    rename_table.insert('.', "Dot");
-    rename_table.insert('>', "GT");
-    rename_table.insert('<', "LT");
-    rename_table.insert('&', "And");
-    rename_table.insert('%', "Percent");
-    rename_table.insert('\'', "Tick");
-    rename_table.insert('#', "Hash");
-    rename_table.insert('`', "BackTick");
-    rename_table.insert(';', "Semi");
-    rename_table.insert(':', "Colon");
-    rename_table.insert('{', "CurlyL");
-    rename_table.insert('}', "CurlyR");
-    rename_table
+    let mut table = HashMap::new();
+    table.insert('=' ,"__Equal__");
+    table.insert('-' ,"__Dash_"_);
+    table.insert('*' ,"__Star_"_);
+    table.insert('/' ,"__Slash__");
+    table.insert('+' ,"__Plus_"_);
+    table.insert('?' ,"__Question__");
+    table.insert('$' ,"__Dollar__");
+    table.insert('!' ,"__Bang__");
+    table.insert('@' ,"__At__");
+    table.insert('~' ,"__Tilde__");
+    table.insert('.' ,"__Dot__");
+    table.insert('>' ,"__GT__");
+    table.insert('<' ,"__LT__");
+    table.insert('&' ,"__And__");
+    table.insert('%' ,"__Percent__");
+    table.insert('\'',"__Tick__");
+    table.insert('#' ,"__Hash__");
+    table.insert('`' ,"__BackTick__");
+    table.insert(';' ,"__Semi__");
+    table.insert(':' ,"__Colon__");
+    table.insert('{' ,"__CurlyL__");
+    table.insert('}' ,"__CurlyR__");
+    table
+});
+
+thread_local!(static SYMBOL_CHAR_UNRENAME_TABLE: HashMap<&'static str,char> = {
+    let mut table = HashMap::new();
+    table.insert("__Equal__"    ,'=');
+    table.insert("__Dash_"_     ,'-');
+    table.insert("__Star_"_     ,'*');
+    table.insert("__Slash__"    ,'/');
+    table.insert("__Plus_"_     ,'+');
+    table.insert("__Question__" ,'?');
+    table.insert("__Dollar__"   ,'$');
+    table.insert("__Bang__"     ,'!');
+    table.insert("__At__"       ,'@');
+    table.insert("__Tilde__"    ,'~');
+    table.insert("__Dot__"      ,'.');
+    table.insert("__GT__"       ,'>');
+    table.insert("__LT__"       ,'<');
+    table.insert("__And__"      ,'&');
+    table.insert("__Percent__"  ,'%');
+    table.insert("__Tick__"     ,'\'');
+    table.insert("__Hash__"     ,'#');
+    table.insert("__BackTick__" ,'`');
+    table.insert("__Semi__"     ,';');
+    table.insert("__Colon__"    ,':');
+    table.insert("__CurlyL__"   ,'{');
+    table.insert("__CurlyR__"   ,'}');
+    table
 });
 // Symbol\ Character\ Rename\ Table:1 ends here
 
@@ -210,10 +237,67 @@ thread_local!(static SYMBOL_KEYWORD_RENAME_TABLE: HashMap<&'static str, &'static
     keyword_rename_table.insert("yield"    ,"shen_yield");
     keyword_rename_table
 });
+
+thread_local!(static SYMBOL_KEYWORD_UNRENAME_TABLE: HashMap<&'static str, &'static str> = {
+    let mut table = HashMap::new();
+    table.insert("shen_abstract" ,"abstract");
+    table.insert("shen_alignof"  ,"alignof");
+    table.insert("shen_as"       ,"as");
+    table.insert("shen_become"   ,"become");
+    table.insert("shen_box"      ,"box");
+    table.insert("shen_break"    ,"break");
+    table.insert("shen_const"    ,"const");
+    table.insert("shen_continue" ,"continue" );
+    table.insert("shen_crate"    ,"crate");
+    table.insert("shen_do"       ,"do");
+    table.insert("shen_else"     ,"else");
+    table.insert("shen_enum"     ,"enum");
+    table.insert("shen_extern"   ,"extern");
+    table.insert("shen_false"    ,"false");
+    table.insert("shen_final"    ,"final");
+    table.insert("shen_fn"       ,"fn");
+    table.insert("shen_for"      ,"for");
+    table.insert("shen_if"       ,"if");
+    table.insert("shen_impl"     ,"impl");
+    table.insert("shen_in"       ,"in");
+    table.insert("shen_let"      ,"let");
+    table.insert("shen_loop"     ,"loop");
+    table.insert("shen_macro"    ,"macro");
+    table.insert("shen_match"    ,"match");
+    table.insert("shen_mod"      ,"mod");
+    table.insert("shen_move"     ,"move");
+    table.insert("shen_mut"      ,"mut");
+    table.insert("shen_offsetof" ,"offsetof");
+    table.insert("shen_override" ,"override");
+    table.insert("shen_priv"     ,"priv");
+    table.insert("shen_proc"     ,"proc");
+    table.insert("shen_pub"      ,"pub");
+    table.insert("shen_pure"     ,"pure");
+    table.insert("shen_ref"      ,"ref");
+    table.insert("shen_return"   ,"return");
+    table.insert("shen_Self"     ,"Self");
+    table.insert("shen_self"     ,"self");
+    table.insert("shen_sizeof"   ,"sizeof");
+    table.insert("shen_static"   ,"static");
+    table.insert("shen_struct"   ,"struct");
+    table.insert("shen_super"    ,"super");
+    table.insert("shen_trait"    ,"trait");
+    table.insert("shen_true"     ,"true");
+    table.insert("shen_type"     ,"type");
+    table.insert("shen_typeof"   ,"typeof");
+    table.insert("shen_unsafe"   ,"unsafe");
+    table.insert("shen_unsized"  ,"unsized");
+    table.insert("shen_use"      ,"use");
+    table.insert("shen_virtual"  ,"virtual");
+    table.insert("shen_where"    ,"where");
+    table.insert("shen_while"    ,"while");
+    table.insert("shen_yield"    ,"yield");
+    table
+});
 // Symbol\ Keyword\ Rename\ Table:1 ends here
 
 // [[file:../shen-rust.org::*Helpers][Helpers:1]]
-pub fn shen_symbol_renamer(symbol_characters : &Vec<char>) -> String {
+pub fn shen_rename_symbol(symbol_characters : &Vec<char>) -> String {
     let symbol : String = symbol_characters.into_iter().cloned().collect();
     SYMBOL_KEYWORD_RENAME_TABLE.with ( | table | {
         match table.get(symbol.as_str()) {
@@ -229,6 +313,28 @@ pub fn shen_symbol_renamer(symbol_characters : &Vec<char>) -> String {
                     })
                 }
                 result
+            }
+        }
+    })
+}
+
+pub fn shen_unrename_symbol(s : String) -> String {
+    SYMBOL_KEYWORD_UNRENAME_TABLE.with(|table|{
+        match table.get(s.as_str()) {
+            Some(unrenamed) => String::from(unrenamed.clone()),
+            None => {
+                SYMBOL_CHAR_UNRENAME_TABLE.with(|table| {
+                    let mut s = s.clone();
+                    let mut keys : Vec<&str> = table.keys().cloned().collect();
+                    keys.sort_by(|a,b| b.len().cmp(&a.len()));
+                    for k in keys {
+                        let new_s = s.clone();
+                        let replace_with : char = table.get(k).unwrap().clone();
+                        let split : Vec<&str> = new_s.as_str().split(k).collect();
+                        s = split.join(replace_with.to_string().as_str()).clone();
+                    }
+                    s
+                })
             }
         }
     })
@@ -253,7 +359,7 @@ named!(klsymbol<KlElement>,
        || {
            let mut res : Vec <char> = vec![initial];
            res.extend(remainder);
-           KlElement::Symbol(shen_symbol_renamer(&res))
+           KlElement::Symbol(shen_rename_symbol(&res))
        })
 );
 // Parser:1 ends here
@@ -451,7 +557,6 @@ fn collect_sexps(kl: &[u8], kl_buffer: &mut Vec<Vec<KlElement>>) -> () {
     };
     // remove toplevel strings
     parsed.retain(|expr| match expr { &KlElement::Cons(_) => true, _ => false });
-    println!("{:?}", get_all_tail_calls(&parsed[0]));
     kl_buffer.push(parsed)
 }
 // Collect:1 ends here
@@ -492,7 +597,6 @@ pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlEl
         while pending.len() > 0 {
             let mut newly_found = Vec::new();
             if let Some((ref path, &KlElement::Cons(ref current))) = pending.pop() {
-                println!("{:?}", current);
                 if let &[ref rest.., ref symbol] = current.as_slice() {
                     if let &KlElement::Symbol(ref s) = &**symbol {
                         match (s.as_str(), rest) {
@@ -1011,7 +1115,7 @@ pub fn shen_str() -> KlClosure {
                     &KlElement::Number(KlNumber::Float(f)) =>
                         KlClosure::Done(Ok(Some(Rc::new(KlElement::String(format!("{}", f)))))),
                     &KlElement::Symbol(ref s) =>
-                        KlClosure::Done(Ok(Some(Rc::new(KlElement::String(s.clone()))))),
+                        KlClosure::Done(Ok(Some(Rc::new(KlElement::String(shen_unrename_symbol(s.clone())))))),
                     &KlElement::Stream(ref s) => {
                         match &**s {
                             &KlStream::FileStream(_) =>
@@ -1195,7 +1299,7 @@ pub fn shen_set () -> KlClosure {
 }
 // Set:1 ends here
 
-// [[file:../shen-rust.org::*Get][Get:1]]
+// [[file:../shen-rust.org::*Value][Value:1]]
 pub fn shen_value() -> KlClosure {
     KlClosure::FeedMe(
         Rc::new(
@@ -1217,7 +1321,7 @@ pub fn shen_value() -> KlClosure {
         )
     )
 }
-// Get:1 ends here
+// Value:1 ends here
 
 // [[file:../shen-rust.org::*Cons][Cons:1]]
 pub fn shen_cons() -> KlClosure {
