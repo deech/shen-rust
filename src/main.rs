@@ -23,7 +23,15 @@ use std::fmt;
 // Preamble:1 ends here
 
 // [[file:../shen-rust.org::*Token%20Types][Token\ Types:1]]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub enum KlToken {
+    Symbol(String),
+    Number(KlNumber),
+    String(String),
+    Cons(Vec<KlToken>)
+}
+
+#[derive(Debug, Clone)]
 pub enum KlNumber {
     Float(f64),
     Int(i64),
@@ -70,7 +78,7 @@ pub enum KlElement {
     Stream(Rc<KlStream>)
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub enum KlError {
     ErrorString(String)
 }
@@ -79,14 +87,17 @@ pub enum KlError {
 pub enum KlClosure {
     FeedMe(Rc<Fn(Rc<KlElement>) -> KlClosure>),
     Thunk(Rc<Fn() -> Rc<KlElement>>),
-    Done(Result<Option<Rc<KlElement>>,Rc<KlError>>)
+    Done(Result<Option<Rc<KlElement>>,Rc<KlError>>),
+    Trampoline(Rc<Fn() -> Rc<KlElement>>)
 }
+
 impl fmt::Debug for KlClosure {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &KlClosure::Done(_) => write!(f, "Saturated"),
             &KlClosure::Thunk(_) => write!(f, "Thunk"),
             &KlClosure::FeedMe(_) => write!(f, "Unsaturated"),
+            &KlClosure::Trampoline(_) => write!(f, "Trampoline"),
         }
     }
 }
@@ -347,7 +358,7 @@ const DIGITS: &'static str = "0123456789";
 // Constants:1 ends here
 
 // [[file:../shen-rust.org::*Parser][Parser:1]]
-named!(klsymbol<KlElement>,
+named!(klsymbol<KlToken>,
        chain!(
        initial: one_of!(CHARACTERS) ~
        remainder: many0!(
@@ -359,21 +370,21 @@ named!(klsymbol<KlElement>,
        || {
            let mut res : Vec <char> = vec![initial];
            res.extend(remainder);
-           KlElement::Symbol(shen_rename_symbol(res.into_iter().collect()))
+           KlToken::Symbol(shen_rename_symbol(res.into_iter().collect()))
        })
 );
 // Parser:1 ends here
 
 // [[file:../shen-rust.org::*Parsers][Parsers:1]]
-named!(klnumber<KlElement>,
+named!(klnumber<KlToken>,
        alt_complete!(
            chain!(
                n: klfloat,
-               || KlElement::Number(n)
+               || KlToken::Number(n)
            ) |
            chain!(
                n : klint,
-               || KlElement::Number(n)
+               || KlToken::Number(n)
            )
        )
 );
@@ -425,12 +436,12 @@ fn make_int(sign: Option<char>, numbers: Vec<char>) -> i64 {
 // Helpers:1 ends here
 
 // [[file:../shen-rust.org::*Parsers][Parsers:1]]
-named!(klstring<KlElement>,
+named!(klstring<KlToken>,
        chain!(
            char!('\"') ~
            contents:  many0!(klstringinnards) ~
            char!('\"'),
-           || KlElement::String(make_quoted_string(contents))
+           || KlToken::String(make_quoted_string(contents))
        )
 );
 
@@ -510,7 +521,7 @@ macro_rules! many0_until (
 // Many\ Until\ Combinator:1 ends here
 
 // [[file:../shen-rust.org::*Parsers][Parsers:1]]
-named!(klsexps< Vec<KlElement> >,
+named!(klsexps< Vec<KlToken> >,
        many0!(
            chain!(
                opt!(multispace) ~
@@ -521,24 +532,18 @@ named!(klsexps< Vec<KlElement> >,
        )
 );
 
-named!(klsexp<KlElement>,
+named!(klsexp<KlToken>,
        chain!(
            char!('(') ~
            inner: many0_until!(char!(')'), klsexpinnards) ~
            char!(')'),
            || {
-               let mut innards = inner;
-               innards.reverse();
-               let result = innards.into_iter().map(| i | {
-                   Rc::new(i)
-               })
-               .collect();
-               KlElement::Cons(result)
+               KlToken::Cons(inner)
            }
        )
 );
 
-named!(klsexpinnards<KlElement>,
+named!(klsexpinnards<KlToken>,
        chain!(
            opt!(multispace) ~
            atom: alt_complete!(klsexp|klnumber|klstring|klsymbol) ~
@@ -549,14 +554,14 @@ named!(klsexpinnards<KlElement>,
 // Parsers:1 ends here
 
 // [[file:../shen-rust.org::*Collect][Collect:1]]
-fn collect_sexps(kl: &[u8], kl_buffer: &mut Vec<Vec<KlElement>>) -> () {
+fn collect_sexps(kl: &[u8], kl_buffer: &mut Vec<Vec<KlToken>>) -> () {
     let mut parsed = match klsexps(kl) {
         IResult::Done(_, out) => out,
         IResult::Incomplete(x) => panic!("incomplete: {:?}", x),
         IResult::Error(e) => panic!("error: {:?}", e),
     };
     // remove toplevel strings
-    parsed.retain(|expr| match expr { &KlElement::Cons(_) => true, _ => false });
+    parsed.retain(|expr| match expr { &KlToken::Cons(_) => true, _ => false });
     kl_buffer.push(parsed)
 }
 // Collect:1 ends here
@@ -570,10 +575,10 @@ pub fn add_path (old_path:&Vec<usize>, new_path:Vec<usize>) -> Vec<usize> {
 // Path\ Utilites:1 ends here
 
 // [[file:../shen-rust.org::*Getter][Getter:1]]
-pub fn get_element_at (path : Vec<usize>, sexp: &KlElement)  -> Option<&KlElement> {
+pub fn get_element_at (path : Vec<usize>, sexp: &KlToken)  -> Option<&KlToken> {
     let mut current_token = sexp;
     for index in path {
-        if let &KlElement::Cons(ref current) = current_token {
+        if let &KlToken::Cons(ref current) = current_token {
             if index < current.len() {
                 current_token = &current[index];
             }
@@ -590,74 +595,68 @@ pub fn get_element_at (path : Vec<usize>, sexp: &KlElement)  -> Option<&KlElemen
 // Getter:1 ends here
 
 // [[file:../shen-rust.org::*Detect%20Possible%20Recursive%20Calls][Detect\ Possible\ Recursive\ Calls:1]]
-pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlElement) -> Vec<Vec<usize>> {
+pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlToken) -> Vec<Vec<usize>> {
     let mut found : Vec< Vec<usize> >= Vec::new();
-    if let &KlElement::Cons(_) = sexp {
-        let mut pending : Vec <(Vec<usize>, &KlElement)> = vec![(Vec::new(), sexp)];
+    if let &KlToken::Cons(_) = sexp {
+        let mut pending : Vec <(Vec<usize>, &KlToken)> = vec![(Vec::new(), sexp)];
         while pending.len() > 0 {
             let mut newly_found = Vec::new();
-            if let Some((ref path, &KlElement::Cons(ref current))) = pending.pop() {
-                if let &[ref rest.., ref symbol] = current.as_slice() {
-                    if let &KlElement::Symbol(ref s) = &**symbol {
-                        match (s.as_str(), rest) {
-                            (name, rest) if (name == function_name.as_str()) && rest.len() == num_args => {
-                                found.push(path.clone());
-                            },
-                            ("cond", rest) => {
-                                let indexed : Vec<(usize, &Rc<KlElement>)> = rest.iter().enumerate().collect();
-                                for &(index, sexp) in indexed.as_slice() {
-                                    if let &KlElement::Cons(ref pair) = &**sexp {
-                                        if let &[ref action,_] = pair.as_slice() {
-                                            if let action @ &KlElement::Cons(_) = &**action {
-                                                newly_found.push((add_path(path, vec![index+1, 1]), action));
-                                            }
-                                        }
+            let next = pending.pop().unwrap();
+            if let (ref path, &KlToken::Cons(ref current)) = next {
+                if let &[KlToken::Symbol(ref s), ref rest..] = current.as_slice() {
+                    match (s.as_str(), rest) {
+                        (name, rest) if (name == function_name.as_str()) && rest.len() == num_args => {
+                            found.push(path.clone());
+                        },
+                        ("cond", rest) => {
+                            let indexed : Vec<(usize, &KlToken)> = rest.iter().enumerate().collect();
+                            for (index, sexp) in indexed {
+                                if let &KlToken::Cons(ref pair) = sexp {
+                                    if let &[_, ref action @ KlToken::Cons(_)] = pair.as_slice() {
+                                        newly_found.push((add_path(path, vec![index + 1,1]), action));
                                     }
-                                };
-                            },
-                            ("if", &[ref if_false, ref if_true,_]) => {
-                                if let if_true @ &KlElement::Cons(_) = &**if_true {
-                                    newly_found.push((add_path(path, vec![0]), if_true));
                                 }
-                                if let if_false @ &KlElement::Cons(_) = &**if_false {
-                                    newly_found.push((add_path(path, vec![1]), if_false));
-                                }
-                            },
-                            ("trap_error", &[ref handler, ref to_try]) => {
-                                if let handler @ &KlElement::Cons(_) = &**handler {
-                                    newly_found.push((add_path(path, vec![0]), handler));
-                                }
-                                if let to_try @ &KlElement::Cons(_) = &**to_try {
-                                    newly_found.push((add_path(path, vec![1]), to_try));
-                                }
+                            };
+                        },
+                        ("if", &[_,ref if_true, ref if_false]) => {
+                            if let if_true @ &KlToken::Cons(_) = if_true {
+                                newly_found.push((add_path(path, vec![2]), if_true));
                             }
-                            ("let", &[ref body,_,_]) |
-                            ("defun", &[ref body,_,_]) =>
-                                if let body @ &KlElement::Cons(_) = &**body {
-                                    newly_found.push((add_path(path, vec![0]), body))
-                                },
-                            ("lambda", &[ref body,_]) =>
-                                if let body @ &KlElement::Cons(_) = &**body {
-                                newly_found.push((add_path(path, vec![0]), body))
-                                },
-                            (_, &[ref body,_]) => {
-                                if let body @ &KlElement::Cons(_) = &**body {
-                                    newly_found.push((add_path(path, vec![current.len() - 1]), body))
-                                }
-                            },
-                            _ => ()
-                        }
+                            if let if_false @ &KlToken::Cons(_) = if_false {
+                                newly_found.push((add_path(path, vec![3]), if_false));
+                            }
+                        },
+                        ("trap_error", &[ref to_try, ref handler]) => {
+                            if let to_try @ &KlToken::Cons(_) = to_try{
+                                newly_found.push((add_path(path, vec![1]), to_try));
+                            }
+                            if let handler @ &KlToken::Cons(_) = handler {
+                                newly_found.push((add_path(path, vec![2]), handler));
+                            }
+                        },
+                        ("let", &[_ , _, ref body @ KlToken::Cons(_)]) |
+                        ("defun", &[_ , _, ref body @ KlToken::Cons(_)]) =>
+                            newly_found.push((add_path(path, vec![3]), body)),
+                        ("lambda", &[_, ref body @ KlToken::Cons(_)]) =>
+                            newly_found.push((add_path(path, vec![2]), body)),
+                        _ =>
+                            match current.last() {
+                                Some(ref tail @ &KlToken::Cons(_)) =>
+                                    newly_found.push((add_path(path, vec![current.len() - 1]), tail)),
+                                _ => ()
+                            }
                     }
                 }
                 else {
-                    if let &[ref tail,_] = current.as_slice() {
-                        if let tail @ &KlElement::Cons(_) = &**tail {
-                            newly_found.push((add_path(path, vec![current.len() - 1]), tail))
-                        }
+                    match current.last() {
+                        Some(ref tail @ &KlToken::Cons(_)) =>
+                            newly_found.push((add_path(path, vec![current.len() - 1]), tail)),
+                        _ => ()
                     }
                 }
-            };
-            pending.extend(newly_found)
+            }
+            newly_found.reverse();
+            pending.extend(newly_found);
         }
     }
     found
@@ -665,29 +664,33 @@ pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlEl
 // Detect\ Possible\ Recursive\ Calls:1 ends here
 
 // [[file:../shen-rust.org::*Detect%20Function%20Application%20Context][Detect\ Function\ Application\ Context:1]]
-pub fn start_of_function_chain (tail_call_path: Vec<usize>, sexp: &KlElement) -> Option<Vec<usize>> {
+pub fn start_of_function_chain (tail_call_path: Vec<usize>, sexp: &KlToken) -> Option<Vec<usize>> {
     let mut result = None;
     let mut i = 0;
     while i < tail_call_path.len() {
         let current_path : Vec<usize> = tail_call_path.iter().cloned().take(i).collect();
-        match get_element_at(current_path.clone(), sexp) {
-            Some(&KlElement::Cons(ref current)) => {
-                if let &[ref rest.., ref s] = current.as_slice() {
-                    if let &KlElement::Symbol(ref s) = &**s {
-                        match s.as_str() {
-                            "if" | "defun" | "let" | "lambda" | "do" => {
-                                result = None;
-                                i = i + 1;
-                            }
-                            "cond" => {
-                                result = None;
-                                i = i + 2;
-                            }
-                            _ => {
-                                result = Some(current_path.clone());
-                                i = i + 1
+        match get_element_at(current_path.clone(), &sexp) {
+            Some(current_element) => {
+                if let &KlToken::Cons(ref current) = current_element {
+                    match current.as_slice() {
+                        &[KlToken::Symbol(ref s), ..] => {
+                            match s.as_str() {
+                                "if" | "defun" | "let" | "lambda" | "do" => {
+                                    result = None;
+                                    i = i + 1;
+                                }
+                                "cond" => {
+                                    result = None;
+                                    i = i + 2;
+                                }
+                                _ => {
+                                    result = Some(current_path.clone());
+                                    i = i + 1
+                                }
+
                             }
                         }
+                        _ => ()
                     }
                 }
             },
@@ -699,37 +702,174 @@ pub fn start_of_function_chain (tail_call_path: Vec<usize>, sexp: &KlElement) ->
 // Detect\ Function\ Application\ Context:1 ends here
 
 // [[file:../shen-rust.org::*Get%20Tail%20Calls][Get\ Tail\ Calls:1]]
-pub fn get_all_tail_calls (sexp: &KlElement) -> Vec<Vec<usize>> {
-    let mut result = Vec::new();
-    if let &KlElement::Cons(ref defun) = sexp {
+pub fn shen_get_all_tail_calls (sexp: &KlToken) -> Vec<Vec<usize>> {
+    if let &KlToken::Cons(ref defun) = sexp {
         match defun.as_slice() {
-            &[_, ref args, ref name, ref defun] => {
-                if let &KlElement::Symbol(ref s) = &**defun {
-                    if s.as_str() == "defun" {
-                        if let &KlElement::Symbol(ref name) = &**name {
-                            if let &KlElement::Cons(ref args) = &**args {
-                                let mut recursive_calls = find_recursive_calls(name.clone(), args.len(), sexp);
-                                recursive_calls.retain(
-                                    |ref path| {
-                                        let context = start_of_function_chain(path.iter().cloned().collect(), sexp);
-                                        match context {
-                                            Some(_) => false,
-                                            None => true
-                                        }
-                                    }
-                                );
-                                result = recursive_calls
+            &[KlToken::Symbol(ref defun), KlToken::Symbol(ref name), KlToken::Cons(ref args), _]
+                if defun.as_str() == "defun" => {
+                    let mut recursive_calls = find_recursive_calls(name.clone(), args.len(), sexp);
+                    recursive_calls.retain(
+                        |ref path| {
+                            let context = start_of_function_chain(path.iter().cloned().collect(), sexp);
+                            match context {
+                                Some(_) => false,
+                                None => true
                             }
                         }
-                    }
-                 }
+                    );
+                    recursive_calls
+                },
+            _ => Vec::new()
+        }
+    }
+    else {
+        Vec::new()
+    }
+}
+// Get\ Tail\ Calls:1 ends here
+
+// [[file:../shen-rust.org::*Function%20Lookup][Function\ Lookup:1]]
+pub fn shen_lookup_function(s: &String) -> Option<KlClosure> {
+    FUNCTION_TABLE.with(|table|{
+        let table = table.borrow();
+        let function = table.get(s);
+        match function {
+            Some(f) => Some((*f).clone()),
+            None => None
+        }
+    })
+}
+// Function\ Lookup:1 ends here
+
+// [[file:../shen-rust.org::*Map%20Test][Map\ Test:1]]
+// KlElement::Closure(
+//     KlClosure::Thunk(
+//         Rc::new(
+//             move || {
+//                 let V14881 = V14881.clone();
+//                 shen_lookup_function("__Equal__")(V14881)
+//             }
+//         )
+//     )
+// )
+// Map\ Test:1 ends here
+
+// [[file:../shen-rust.org::*Generate][Generate:1]]
+pub fn generate_nested_closures(args: Vec<String>) -> Vec<String> {
+    let mut result : Vec<String> = Vec::new();
+    let mut clones = Vec::new();
+    let indexed_args : Vec<(usize, String)> = args.iter().cloned().enumerate().collect();
+    for (ref i,ref arg) in indexed_args {
+        result.push(
+            if *i == 0 {
+                format!("KlClosure::FeedMe( Rc::new (| {} | {{", arg)
+            }
+            else {
+                format!("move | {} | {{", arg)
+            }
+        );
+        result.push(clones.join(";"));
+        clones.push(format!("let {} = {}.clone())", arg, arg));
+    }
+    result
+}
+
+pub fn generate_thunk(token: &KlToken) -> String {
+    let mut result : Vec<String> = Vec::new();
+    result.push(String::from("KlClosure::Thunk(Rc::new()"));
+    result.push(generate(token));
+    result.join("")
+}
+
+pub fn generate_lambda(token:&KlToken) -> String {
+    let mut result : Vec<String> = Vec::new();
+    if let &KlToken::Cons(ref klif) = &*token {
+        match klif.as_slice() {
+            &[KlToken::Symbol(ref kllambda), ref x, ref body] if kllambda.as_str() == "lambda" => {
+                ()
             },
             _ => ()
         }
     }
-    result
+    result.join("")
 }
-// Get\ Tail\ Calls:1 ends here
+
+pub fn generate_let(token:&KlToken) -> String {
+    let mut result : Vec<String> = Vec::new();
+    if let &KlToken::Cons(ref klif) = &*token {
+        match klif.as_slice() {
+            &[KlToken::Symbol(ref kllet), ref x, ref y, ref body] if kllet.as_str() == "let" => {
+                let lambda_token = [&KlToken::Symbol(String::from("lambda")), x, body];
+                ()
+            },
+            _ => ()
+        }
+    }
+    result.join("")
+}
+
+pub fn generate_freeze(token:&KlToken) -> String {
+    let mut result : Vec<String> = Vec::new();
+    if let &KlToken::Cons(ref klif) = &*token {
+        match klif.as_slice() {
+            &[KlToken::Symbol(ref klfreeze), ref a] if klfreeze.as_str() == "freeze" => {
+                generate_thunk(a);
+            },
+            _ => ()
+        }
+    }
+    result.join("")
+}
+
+pub fn generate_and_or(token:&KlToken) -> String {
+    let mut result : Vec<String> = Vec::new();
+    if let &KlToken::Cons(ref klif) = &*token {
+        match klif.as_slice() {
+            &[KlToken::Symbol(ref kland_or), ref a, ref b] if kland_or.as_str() == "and" || kland_or.as_str() == "or" => {
+                generate_thunk(a);
+                generate_thunk(b);
+            },
+            _ => ()
+        }
+    }
+    result.join("")
+}
+
+pub fn generate_if(token: &KlToken) -> String {
+    let mut result : Vec<String> = Vec::new();
+    if let &KlToken::Cons(ref klif) = &*token {
+        match klif.as_slice() {
+            &[KlToken::Symbol(ref klif), ref predicate, ref if_branch, ref else_branch] if klif.as_str() == "if" => {
+                generate(predicate);
+                generate_thunk(if_branch);
+                generate_thunk(else_branch);
+            },
+            _ => ()
+        }
+    }
+    result.join("")
+}
+
+pub fn generate_defun(token: &KlToken) -> String {
+    let mut result : Vec<String> = Vec::new();
+    if let &KlToken::Cons(ref kldefun) = &*token {
+        match kldefun.as_slice() {
+            &[KlToken::Symbol(ref kldefun), KlToken::Symbol(ref name), KlToken::Cons(ref args), KlToken::Cons(ref body)] if kldefun.as_str() == "defun" => {
+                let paths = shen_get_all_tail_calls(token);
+                ()
+            },
+            _ => ()
+        }
+    }
+    result.join("")
+}
+
+pub fn generate(token: &KlToken) -> String {
+    let mut result : Vec<String> = Vec::new();
+    result.push(generate_defun(token));
+    result.join("")
+}
+// Generate:1 ends here
 
 // [[file:../shen-rust.org::*Helpers][Helpers:1]]
 pub fn shen_symbol_to_string(s : &KlElement) -> Result<Rc<&String>, Rc<String>> {
@@ -1967,7 +2107,7 @@ fn main () {
         .collect();
     for f in with_klambda_path {
         let path = Path::new(&f);
-        let mut kl : Vec<Vec<KlElement>>= Vec::new();
+        let mut kl : Vec<Vec<KlToken>>= Vec::new();
         match File::open(path) {
             Ok(mut f) => {
                 let mut buffer : Vec<u8> = Vec::new();
@@ -1982,5 +2122,7 @@ fn main () {
             Err(e) => panic!("error: {:?}", e)
         }
     }
+    let result = generate_nested_closures(vec![String::from("x"),String::from("y"),String::from("z")]);
+    println!("{:?}", result);
 }
 // KLambda\ Files:2 ends here
