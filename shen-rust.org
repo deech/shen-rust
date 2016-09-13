@@ -162,7 +162,7 @@
       table.insert('-' ,"__Dash_"_);
       table.insert('*' ,"__Star_"_);
       table.insert('/' ,"__Slash__");
-      table.insert('+' ,"__Plus_"_);
+      table.insert('+' ,"__Plus__");
       table.insert('?' ,"__Question__");
       table.insert('$' ,"__Dollar__");
       table.insert('!' ,"__Bang__");
@@ -213,60 +213,60 @@
 *** Symbol Keyword Rename Table
 #+BEGIN_SRC rust :tangle src/main.rs
   thread_local!(static SYMBOL_KEYWORD_RENAME_TABLE: HashMap<&'static str, &'static str> = {
-      let mut keyword_rename_table = HashMap::new();
-      keyword_rename_table.insert("abstract" ,"shen_abstract");
-      keyword_rename_table.insert("alignof"  ,"shen_alignof");
-      keyword_rename_table.insert("as"       ,"shen_as");
-      keyword_rename_table.insert("become"   ,"shen_become");
-      keyword_rename_table.insert("box"      ,"shen_box");
-      keyword_rename_table.insert("break"    ,"shen_break");
-      keyword_rename_table.insert("const"    ,"shen_const");
-      keyword_rename_table.insert("continue" ,"shen_continue");
-      keyword_rename_table.insert("crate"    ,"shen_crate");
-      keyword_rename_table.insert("do"       ,"shen_do");
-      keyword_rename_table.insert("else"     ,"shen_else");
-      keyword_rename_table.insert("enum"     ,"shen_enum");
-      keyword_rename_table.insert("extern"   ,"shen_extern");
-      keyword_rename_table.insert("false"    ,"shen_false");
-      keyword_rename_table.insert("final"    ,"shen_final");
-      keyword_rename_table.insert("fn"       ,"shen_fn");
-      keyword_rename_table.insert("for"      ,"shen_for");
-      keyword_rename_table.insert("if"       ,"shen_if");
-      keyword_rename_table.insert("impl"     ,"shen_impl");
-      keyword_rename_table.insert("in"       ,"shen_in");
-      keyword_rename_table.insert("let"      ,"shen_let");
-      keyword_rename_table.insert("loop"     ,"shen_loop");
-      keyword_rename_table.insert("macro"    ,"shen_macro");
-      keyword_rename_table.insert("match"    ,"shen_match");
-      keyword_rename_table.insert("mod"      ,"shen_mod");
-      keyword_rename_table.insert("move"     ,"shen_move");
-      keyword_rename_table.insert("mut"      ,"shen_mut");
-      keyword_rename_table.insert("offsetof" ,"shen_offsetof");
-      keyword_rename_table.insert("override" ,"shen_override");
-      keyword_rename_table.insert("priv"     ,"shen_priv");
-      keyword_rename_table.insert("proc"     ,"shen_proc");
-      keyword_rename_table.insert("pub"      ,"shen_pub");
-      keyword_rename_table.insert("pure"     ,"shen_pure");
-      keyword_rename_table.insert("ref"      ,"shen_ref");
-      keyword_rename_table.insert("return"   ,"shen_return");
-      keyword_rename_table.insert("Self"     ,"shen_Self");
-      keyword_rename_table.insert("self"     ,"shen_self");
-      keyword_rename_table.insert("sizeof"   ,"shen_sizeof");
-      keyword_rename_table.insert("static"   ,"shen_static");
-      keyword_rename_table.insert("struct"   ,"shen_struct");
-      keyword_rename_table.insert("super"    ,"shen_super");
-      keyword_rename_table.insert("trait"    ,"shen_trait");
-      keyword_rename_table.insert("true"     ,"shen_true");
-      keyword_rename_table.insert("type"     ,"shen_type");
-      keyword_rename_table.insert("typeof"   ,"shen_typeof");
-      keyword_rename_table.insert("unsafe"   ,"shen_unsafe");
-      keyword_rename_table.insert("unsized"  ,"shen_unsized");
-      keyword_rename_table.insert("use"      ,"shen_use");
-      keyword_rename_table.insert("virtual"  ,"shen_virtual");
-      keyword_rename_table.insert("where"    ,"shen_where");
-      keyword_rename_table.insert("while"    ,"shen_while");
-      keyword_rename_table.insert("yield"    ,"shen_yield");
-      keyword_rename_table
+      let mut table = HashMap::new();
+      table.insert("abstract" ,"shen_abstract");
+      table.insert("alignof"  ,"shen_alignof");
+      table.insert("as"       ,"shen_as");
+      table.insert("become"   ,"shen_become");
+      table.insert("box"      ,"shen_box");
+      table.insert("break"    ,"shen_break");
+      table.insert("const"    ,"shen_const");
+      table.insert("continue" ,"shen_continue");
+      table.insert("crate"    ,"shen_crate");
+      table.insert("do"       ,"shen_do");
+      table.insert("else"     ,"shen_else");
+      table.insert("enum"     ,"shen_enum");
+      table.insert("extern"   ,"shen_extern");
+      table.insert("false"    ,"shen_false");
+      table.insert("final"    ,"shen_final");
+      table.insert("fn"       ,"shen_fn");
+      table.insert("for"      ,"shen_for");
+      table.insert("if"       ,"shen_if");
+      table.insert("impl"     ,"shen_impl");
+      table.insert("in"       ,"shen_in");
+      table.insert("let"      ,"shen_let");
+      table.insert("loop"     ,"shen_loop");
+      table.insert("macro"    ,"shen_macro");
+      table.insert("match"    ,"shen_match");
+      table.insert("mod"      ,"shen_mod");
+      table.insert("move"     ,"shen_move");
+      table.insert("mut"      ,"shen_mut");
+      table.insert("offsetof" ,"shen_offsetof");
+      table.insert("override" ,"shen_override");
+      table.insert("priv"     ,"shen_priv");
+      table.insert("proc"     ,"shen_proc");
+      table.insert("pub"      ,"shen_pub");
+      table.insert("pure"     ,"shen_pure");
+      table.insert("ref"      ,"shen_ref");
+      table.insert("return"   ,"shen_return");
+      table.insert("Self"     ,"shen_Self");
+      table.insert("self"     ,"shen_self");
+      table.insert("sizeof"   ,"shen_sizeof");
+      table.insert("static"   ,"shen_static");
+      table.insert("struct"   ,"shen_struct");
+      table.insert("super"    ,"shen_super");
+      table.insert("trait"    ,"shen_trait");
+      table.insert("true"     ,"shen_true");
+      table.insert("type"     ,"shen_type");
+      table.insert("typeof"   ,"shen_typeof");
+      table.insert("unsafe"   ,"shen_unsafe");
+      table.insert("unsized"  ,"shen_unsized");
+      table.insert("use"      ,"shen_use");
+      table.insert("virtual"  ,"shen_virtual");
+      table.insert("where"    ,"shen_where");
+      table.insert("while"    ,"shen_while");
+      table.insert("yield"    ,"shen_yield");
+      table
   });
 
   thread_local!(static SYMBOL_KEYWORD_UNRENAME_TABLE: HashMap<&'static str, &'static str> = {
@@ -330,14 +330,14 @@
 ** Symbols
 *** Helpers
 #+BEGIN_SRC rust :tangle src/main.rs
-  pub fn shen_rename_symbol(symbol_characters : &Vec<char>) -> String {
-      let symbol : String = symbol_characters.into_iter().cloned().collect();
+  pub fn shen_rename_symbol(symbol : String) -> String {
       SYMBOL_KEYWORD_RENAME_TABLE.with ( | table | {
           match table.get(symbol.as_str()) {
               Some(renamed) => String::from(renamed.clone()),
               None => {
                   let mut result = String::new();
-                  for c in symbol_characters {
+                  let symbol_characters : Vec<char> = symbol.chars().collect();
+                  for c in symbol_characters.as_slice() {
                       SYMBOL_CHAR_RENAME_TABLE.with(| table | {
                           match table.get(c) {
                               Some(renamed) => result.push_str(renamed.clone()),
@@ -392,7 +392,7 @@
          || {
              let mut res : Vec <char> = vec![initial];
              res.extend(remainder);
-             KlElement::Symbol(shen_rename_symbol(&res))
+             KlElement::Symbol(shen_rename_symbol(res.into_iter().collect()))
          })
   );
 #+END_SRC
@@ -1907,45 +1907,45 @@
   pub fn shen_fill_function_table() {
       FUNCTION_TABLE.with(| function_table | {
           let mut map = function_table.borrow_mut();
-          map.insert(String::from("shen_if")               ,shen_if());
-          map.insert(String::from("and")                   ,shen_and());
-          map.insert(String::from("or")                    ,shen_or());
-          map.insert(String::from("cond")                  ,shen_cond());
-          map.insert(String::from("intern")                ,shen_intern());
-          map.insert(String::from("pos")                   ,shen_pos());
-          map.insert(String::from("tlstr")                 ,shen_tlstr());
-          map.insert(String::from("cn")                    ,shen_cn());
-          map.insert(String::from("str")                   ,shen_str());
-          map.insert(String::from("stringQuestion")        ,shen_stringp());
-          map.insert(String::from("nDashGTstring")         ,shen_n_to_string());
-          map.insert(String::from("stringDashGTn")         ,shen_string_to_n());
-          map.insert(String::from("simpleDasherror ")      ,shen_simple_error());
-          map.insert(String::from("trapDasherror")         ,shen_trap_error());
-          map.insert(String::from("errorDashtoDashstring") ,shen_error_to_string());
-          map.insert(String::from("set")                   ,shen_set());
-          map.insert(String::from("value")                 ,shen_value());
-          map.insert(String::from("cons")                  ,shen_cons());
-          map.insert(String::from("hd")                    ,shen_hd());
-          map.insert(String::from("tl")                    ,shen_tl());
-          map.insert(String::from("consQuestion")          ,shen_consp());
-          map.insert(String::from("Equal")                 ,shen_equal());
-          map.insert(String::from("absvector")             ,shen_absvector());
-          map.insert(String::from("addressDashGT")         ,shen_insert_at_address());
-          map.insert(String::from("LTDashaddress")         ,shen_get_at_address());
-          map.insert(String::from("absvectorQuestion")     ,shen_absvectorp());
-          map.insert(String::from("write_byte")            ,shen_write_byte());
-          map.insert(String::from("read_byte")             ,shen_read_byte());
-          map.insert(String::from("open")                  ,shen_open());
-          map.insert(String::from("getDashtime")           ,shen_get_time());
-          map.insert(String::from("Plus")                  ,shen_plus());
-          map.insert(String::from("Star")                  ,shen_mul());
-          map.insert(String::from("Dash")                  ,shen_sub());
-          map.insert(String::from("Slash")                 ,shen_div());
-          map.insert(String::from("GT")                    ,shen_ge());
-          map.insert(String::from("LT")                    ,shen_le());
-          map.insert(String::from("LTEqual")               ,shen_eq_le());
-          map.insert(String::from("GTLEqual")              ,shen_eq_ge());
-          map.insert(String::from("numberQuestion")        ,shen_numberp());
+          map.insert(shen_rename_symbol(String::from("shen_if"))         ,shen_if());
+          map.insert(shen_rename_symbol(String::from("and"))             ,shen_and());
+          map.insert(shen_rename_symbol(String::from("or"))              ,shen_or());
+          map.insert(shen_rename_symbol(String::from("cond"))            ,shen_cond());
+          map.insert(shen_rename_symbol(String::from("intern"))          ,shen_intern());
+          map.insert(shen_rename_symbol(String::from("pos"))             ,shen_pos());
+          map.insert(shen_rename_symbol(String::from("tlstr"))           ,shen_tlstr());
+          map.insert(shen_rename_symbol(String::from("cn"))              ,shen_cn());
+          map.insert(shen_rename_symbol(String::from("str"))             ,shen_str());
+          map.insert(shen_rename_symbol(String::from("string?"))         ,shen_stringp());
+          map.insert(shen_rename_symbol(String::from("n->string"))       ,shen_n_to_string());
+          map.insert(shen_rename_symbol(String::from("string->n"))       ,shen_string_to_n());
+          map.insert(shen_rename_symbol(String::from("simple-error"))    ,shen_simple_error());
+          map.insert(shen_rename_symbol(String::from("trap-error"))      ,shen_trap_error());
+          map.insert(shen_rename_symbol(String::from("error-to-string")) ,shen_error_to_string());
+          map.insert(shen_rename_symbol(String::from("set"))             ,shen_set());
+          map.insert(shen_rename_symbol(String::from("value"))           ,shen_value());
+          map.insert(shen_rename_symbol(String::from("cons"))            ,shen_cons());
+          map.insert(shen_rename_symbol(String::from("hd"))              ,shen_hd());
+          map.insert(shen_rename_symbol(String::from("tl"))              ,shen_tl());
+          map.insert(shen_rename_symbol(String::from("cons?"))           ,shen_consp());
+          map.insert(shen_rename_symbol(String::from("="))               ,shen_equal());
+          map.insert(shen_rename_symbol(String::from("absvector"))       ,shen_absvector());
+          map.insert(shen_rename_symbol(String::from("address->"))       ,shen_insert_at_address());
+          map.insert(shen_rename_symbol(String::from("<-address"))       ,shen_get_at_address());
+          map.insert(shen_rename_symbol(String::from("absvector?"))      ,shen_absvectorp());
+          map.insert(shen_rename_symbol(String::from("write-byte"))      ,shen_write_byte());
+          map.insert(shen_rename_symbol(String::from("read-byte"))       ,shen_read_byte());
+          map.insert(shen_rename_symbol(String::from("open"))            ,shen_open());
+          map.insert(shen_rename_symbol(String::from("get-time"))        ,shen_get_time());
+          map.insert(shen_rename_symbol(String::from("+"))               ,shen_plus());
+          map.insert(shen_rename_symbol(String::from("*"))               ,shen_mul());
+          map.insert(shen_rename_symbol(String::from("-"))               ,shen_sub());
+          map.insert(shen_rename_symbol(String::from("/"))               ,shen_div());
+          map.insert(shen_rename_symbol(String::from(">"))               ,shen_ge());
+          map.insert(shen_rename_symbol(String::from("<"))               ,shen_le());
+          map.insert(shen_rename_symbol(String::from("<="))              ,shen_eq_le());
+          map.insert(shen_rename_symbol(String::from(">="))              ,shen_eq_ge());
+          map.insert(shen_rename_symbol(String::from("number?"))         ,shen_numberp());
       })
   }
 #+END_SRC
@@ -2003,7 +2003,7 @@
           },
           _ => panic!("closure")
       };
-      let res = shen_apply_arguments("Plus", vec![Rc::new(KlElement::Number(KlNumber::Int(1))), Rc::new(KlElement::Number(KlNumber::Float(2.22)))]);
+      let res = shen_apply_arguments("__Plus__", vec![Rc::new(KlElement::Number(KlNumber::Int(1))), Rc::new(KlElement::Number(KlNumber::Float(2.22)))]);
       match &*res {
           &KlElement::Closure(KlClosure::Done(Ok(Some(ref e)))) => {
               match &**e {
