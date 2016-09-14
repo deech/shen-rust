@@ -918,6 +918,8 @@ pub fn generate_application(token: &KlToken) -> Vec<String> {
 pub fn generate(token: &KlToken) -> Vec<String> {
     let mut result : Vec<String> = Vec::new();
     result.extend(generate_defun(token));
+    result.extend(generate_application(token));
+    result.extend(generate_atoms(token));
     result
 }
 // Generate:1 ends here
