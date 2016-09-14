@@ -564,7 +564,7 @@ fn collect_sexps(kl: &[u8], kl_buffer: &mut Vec<Vec<KlToken>>) -> () {
     // remove toplevel strings
     parsed.retain(|expr| match expr { &KlToken::Cons(_) => true, _ => false });
     for p in parsed.as_slice() {
-        println!("{}", intersperse(generate(vec![],p), String::from("")));
+        println!("{}", intersperse(generate(vec![], p), String::from("")));
     }
     kl_buffer.push(parsed)
 }
@@ -799,30 +799,49 @@ pub fn shen_apply_arguments_to_lambda(l: Rc<KlElement>, a: Rc<KlElement>) -> Rc<
     }
 }
 
-pub fn shen_apply_arguments(s: String, elements: Vec<Rc<KlElement>>) -> Rc<KlElement> {
+pub fn shen_apply_arguments_to_function(s: String, elements: Vec<Rc<KlElement>>) -> Rc<KlElement> {
     match shen_lookup_function(&s) {
-        Some(f) => {
-            let mut so_far = f.clone();
-            for e in elements.as_slice() {
-                match so_far {
-                    KlClosure::FeedMe(f) =>
-                        so_far = (&f)((*e).clone()),
-                    _ => break
-                }
-            }
-            match so_far {
-                KlClosure::Done(Ok(Some(r))) => r.clone(),
-                KlClosure::Done(Ok(None)) => rc!(symbol!("nil")),
-                _ => rc!(KlElement::Closure(so_far))
+        Some(f) => shen_apply_arguments(Rc::new(KlElement::Closure(f.clone())), elements),
+        None => rc!(error!(format!("Could not find function:{}", s).as_str()))
+    }
+}
+
+pub fn shen_apply_arguments(closure: Rc<KlElement> , elements: Vec<Rc<KlElement>>) -> Rc<KlElement> {
+    match &*closure {
+        &KlElement::Closure(ref c) => {
+            match c {
+                &KlClosure::FeedMe(_) => {
+                    let mut so_far : KlClosure = c.clone();
+                    for e in elements.as_slice() {
+                        match so_far {
+                            KlClosure::FeedMe(f) => so_far = (&f)((*e).clone()),
+                            _ => break
+                        }
+                    }
+                    match so_far {
+                        KlClosure::Done(Ok(Some(r))) => r.clone(),
+                        KlClosure::Done(Ok(None)) => rc!(symbol!("nil")),
+                        _ => rc!(KlElement::Closure(so_far))
+                    }
+                },
+                _ => rc!(error!("Given a fully saturated function or a thunk."))
             }
         },
-        _ => rc!(error!(format!("Could not find function:{}", s).as_str()))
+        _ => rc!(error!("Not given a function."))
     }
 }
 
 pub fn shen_apply_function(s: String, args: Vec<String>) -> Vec<String> {
     let mut result = Vec::new();
-    result.push(format!("shen_apply_arguments(String::from(\"{}\"), vec![", s));
+    result.push(format!("shen_apply_arguments_to_function(String::from(\"{}\"), vec![", s));
+    result.push(intersperse(args,String::from(",")));
+    result.push(String::from("])"));
+    result
+}
+
+pub fn shen_apply_arguments_to_curried(s: String, args: Vec<String>) -> Vec<String> {
+    let mut result = Vec::new();
+    result.push(format!("shen_apply_arguments({}, vec![", s));
     result.push(intersperse(args,String::from(",")));
     result.push(String::from("])"));
     result
@@ -833,29 +852,29 @@ pub fn shen_apply_lambda(l: String, arg: String) -> Vec<String> {
 }
 
 pub fn generate_nested_closures(bound: Vec<String>, args: Vec<String>) -> Vec<String> {
-    let mut result : Vec<String> = Vec::new();
-    let mut closing: Vec<String> = Vec::new();
-    let mut clones = Vec::new();
-    let indexed_args : Vec<(usize, String)> = args.iter().cloned().enumerate().collect();
-    for (ref i,ref arg) in indexed_args {
-        result.push(
-            if *i == 0 {
-                format!("KlClosure::FeedMe( Rc::new (| {} | {{", arg)
-            }
-            else {
-                format!("move | {} | {{", arg)
-            }
-        );
-        clones.push(format!("let {} = {}.clone())", arg, arg));
-        result.push(intersperse(clones.clone(),String::from(";")));
-        closing.push(String::from("}))"));
-    }
-    result
+let mut result : Vec<String> = Vec::new();
+let mut closing: Vec<String> = Vec::new();
+let mut clones = Vec::new();
+let indexed_args : Vec<(usize, String)> = args.iter().cloned().enumerate().collect();
+for (ref i,ref arg) in indexed_args {
+    result.push(
+        if *i == 0 {
+            format!("KlClosure::FeedMe( Rc::new (| {} | {{", arg)
+        }
+        else {
+            format!("move | {} | {{", arg)
+        }
+    );
+    clones.push(format!("let {} = {}.clone())", arg, arg));
+    result.push(intersperse(clones.clone(),String::from(";")));
+    closing.push(String::from("}))"));
+}
+result
 }
 
 pub fn clone_bound_variables(bound: Vec<String>) -> String {
-    let clone_strings : Vec<String> = bound.iter().map(| v | format!("let {} = {}.clone()", v, v)).collect();
-    intersperse(clone_strings, String::from(";")) + ";"
+let clone_strings : Vec<String> = bound.iter().map(| v | format!("let {} = {}.clone()", v, v)).collect();
+intersperse(clone_strings, String::from(";")) + ";"
 }
 
 pub fn generate_closure_start(bound: Vec<String>, args: Vec<String>) -> String {
@@ -905,9 +924,7 @@ pub fn generate_let(bound: Vec<String>, token:&KlToken) -> Vec<String> {
                 let lambda_token = KlToken::Cons(vec![KlToken::Symbol(String::from("lambda")), x.clone(), body.clone()]);
                 result.extend(generate_lambda(bound.clone(),&lambda_token));
                 let lambda_string = intersperse(result.clone(),String::from(""));
-                println!("lambda string {:?}" , lambda_string);
                 let args_string = intersperse(generate(bound.clone(),y),String::from(""));
-                println!("args {:?}" , args_string);
                 result = shen_apply_lambda(lambda_string,args_string);
             },
             _ => ()
@@ -1007,70 +1024,73 @@ result
       }
       result
   }
+// Generate:1 ends here
 
-  pub fn generate_atoms(bound: Vec<String>, token: &KlToken) -> Vec<String> {
-      match token {
-          &KlToken::Number(KlNumber::Int(i)) => vec![format!("Rc::new(KlElement::Number(KlNumber::Int({})))", i)],
-          &KlToken::Number(KlNumber::Float(i)) => vec![format!("Rc::new(KlElement::Number(KlNumber::Float({})))", i)],
-          &KlToken::String(ref s) => vec![format!("Rc::new(KlElement::String(String::from(\"{}\")))", s.clone())],
-          &KlToken::Symbol(ref s) => {
-              if bound.contains(s) {
-                  vec![format!("{}.clone()", s.clone())]
-              }
-              else {
-                  vec![format!("Rc::new(KlElement::Symbol(String::from(\"{}\")))", s.clone())]
-              }
-          },
-          _ => Vec::new()
-      }
-  }
+// [[file:../shen-rust.org::*Atoms][Atoms:1]]
+pub fn generate_atoms(bound: Vec<String>, token: &KlToken) -> Vec<String> {
+    match token {
+        &KlToken::Number(KlNumber::Int(i)) => vec![format!("Rc::new(KlElement::Number(KlNumber::Int({})))", i)],
+        &KlToken::Number(KlNumber::Float(i)) => vec![format!("Rc::new(KlElement::Number(KlNumber::Float({})))", i)],
+        &KlToken::String(ref s) => vec![format!("Rc::new(KlElement::String(String::from(\"{}\")))", s.clone())],
+        &KlToken::Symbol(ref s) => {
+            if bound.contains(s) {
+                vec![format!("{}.clone()", s.clone())]
+            }
+            else {
+                vec![format!("Rc::new(KlElement::Symbol(String::from(\"{}\")))", s.clone())]
+            }
+        },
+        _ => Vec::new()
+    }
+}
+// Atoms:1 ends here
 
-  pub fn generate_application(bound: Vec<String>, token: &KlToken) -> Vec<String> {
-      let mut result = Vec::new();
-      if let &KlToken::Cons(ref application) = &*token {
-          match application.as_slice() {
-              &[KlToken::Symbol(ref s), ref rest..] => {
-                  let args = rest.into_iter().map(| e | intersperse(generate(bound.clone(), e),String::from(""))).collect();
-                  println!("--args {:?}", args);
-                  result = shen_apply_function(s.clone(), args)
-              },
-              &[ref c @ KlToken::Cons(_), ref rest..] => {
-                  result = shen_apply_function(
-                      intersperse(generate(bound.clone(),c),String::from("")),
-                      rest.into_iter().map(| e | intersperse(generate(bound.clone(), e),String::from(""))).collect()
-                  )
-              }
-              &[] => result = vec![String::from("Rc::new(KlElement::Cons(vec![]))")],
-              _ => ()
-          }
-      }
-      result
-  }
+// [[file:../shen-rust.org::*Application][Application:1]]
+pub fn generate_application(bound: Vec<String>, token: &KlToken) -> Vec<String> {
+    let mut result = Vec::new();
+    if let &KlToken::Cons(ref application) = &*token {
+        match application.as_slice() {
+            &[KlToken::Symbol(ref s), ref rest..] => {
+                let args = rest.into_iter().map(| e | intersperse(generate(bound.clone(), e),String::from(""))).collect();
+                result = shen_apply_function(s.clone(), args)
+            },
+            &[ref c @ KlToken::Cons(_), ref rest..] => {
+                let args = rest.into_iter().map(| e | intersperse(generate(bound.clone(), e),String::from(""))).collect();
+                result = shen_apply_arguments_to_curried(intersperse(generate(bound.clone(),c),String::from("")), args);
+            },
+            &[] => result = vec![String::from("Rc::new(KlElement::Cons(vec![]))")],
+            _ => ()
+        }
+    }
+    result
+}
+// Application:1 ends here
 
-  pub fn generate(bound: Vec<String>, token: &KlToken) -> Vec<String> {
-      let mut result : Vec<String> = Vec::new();
-      let generators : Vec<Box<Fn(Vec<String>, &KlToken) -> Vec<String>>>
-          = vec![
-              Box::new(generate_atoms),
-              Box::new(generate_defun),
-              Box::new(generate_cond),
-              Box::new(generate_if),
-              Box::new(generate_and_or),
-              Box::new(generate_lambda),
-              Box::new(generate_let),
-              Box::new(generate_freeze),
-              Box::new(generate_application)
-          ];
-      for g in generators.as_slice() {
-          if result.len() == 0 {
-              result = g(bound.clone(),token);
-          }
-          else {
-              break;
-          }
-      }
-      result
-  }
+// [[file:../shen-rust.org::*Generate][Generate:1]]
+pub fn generate(bound: Vec<String>, token: &KlToken) -> Vec<String> {
+    let mut result : Vec<String> = Vec::new();
+    let generators : Vec<Box<Fn(Vec<String>, &KlToken) -> Vec<String>>>
+        = vec![
+            Box::new(generate_atoms),
+            Box::new(generate_defun),
+            Box::new(generate_cond),
+            Box::new(generate_if),
+            Box::new(generate_and_or),
+            Box::new(generate_lambda),
+            Box::new(generate_let),
+            Box::new(generate_freeze),
+            Box::new(generate_application)
+        ];
+    for g in generators.as_slice() {
+        if result.len() == 0 {
+            result = g(bound.clone(),token);
+        }
+        else {
+            break;
+        }
+    }
+    result
+}
 // Generate:1 ends here
 
 // [[file:../shen-rust.org::*Helpers][Helpers:1]]
@@ -1674,7 +1694,6 @@ pub fn shen_cons() -> KlClosure {
                     Rc::new(
                         move | list | {
                             let new_head = new_head.clone();
-                            println!("{:?}", *list);
                             match *list {
                                 KlElement::Cons(ref cons_cells) => {
                                     let mut new_cons_cells = cons_cells.clone();
@@ -2257,7 +2276,7 @@ const KLAMBDAFILES: &'static [ &'static str ] = &[
 // [[file:../shen-rust.org::*KLambda%20Files][KLambda\ Files:2]]
 fn main () {
     shen_fill_function_table();
-    let result = shen_apply_arguments_to_lambda(Rc::new(KlElement::Closure(KlClosure::FeedMe( Rc::new( | X | {;KlClosure::Done(Ok(Some(shen_apply_arguments_to_lambda(Rc::new(KlElement::Closure(KlClosure::FeedMe( Rc::new( move  | Y | {let X = X.clone();KlClosure::Done(Ok(Some(shen_apply_arguments(String::from("cons"), vec![X.clone(),shen_apply_arguments(String::from("cons"), vec![Y.clone(),Rc::new(KlElement::Cons(vec![]))])]))))})))), Rc::new(KlElement::Symbol(String::from("b")))))))})))), shen_apply_arguments(String::from("shen_if"), vec![shen_apply_arguments(String::from("__Equal__"), vec![shen_apply_arguments(String::from("__Plus__"), vec![Rc::new(KlElement::Number(KlNumber::Int(1))),Rc::new(KlElement::Number(KlNumber::Int(1)))]),Rc::new(KlElement::Number(KlNumber::Int(1)))]),Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( || { Rc::new(KlElement::Symbol(String::from("a"))) })))),Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( || { Rc::new(KlElement::Symbol(String::from("b"))) }))))]));
+    let result = shen_apply_arguments(shen_apply_arguments_to_function(String::from("cons"), vec![Rc::new(KlElement::Number(KlNumber::Int(1)))]), vec![Rc::new(KlElement::Cons(vec![]))]);
     println!("{:?}", result);
     let with_klambda_path : Vec<String> = KLAMBDAFILES
         .into_iter()
