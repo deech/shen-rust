@@ -1,5 +1,5 @@
 // [[file:../shen-rust.org::*Preamble][Preamble:1]]
-#![feature(slice_patterns, advanced_slice_patterns)]
+#![feature(slice_patterns)]
 #![feature(custom_derive)]
 #![feature(try_from)]
 #[macro_use]
@@ -755,8 +755,20 @@ pub fn shen_lookup_function(s: &String) -> Option<KlClosure> {
 // Map\ Test:1 ends here
 
 // [[file:../shen-rust.org::*Generate][Generate:1]]
+pub fn shen_apply_function(s: String, args: Vec<String>) -> Vec<String> {
+    let mut result = Vec::new();
+    let applications : Vec<String> = args.into_iter().map( | token | {
+        format!("({})", token)
+    }).collect();
+    result.push(format!("{{ match shen_lookup_function(&{}) {{ Some(f) => (f)", s));
+    result.extend(applications);
+    result.push(format!(", None => KlClosure::Done(shen_make_error(\"Could not find function: {}\")) }} }}",s));
+    result
+}
+
 pub fn generate_nested_closures(args: Vec<String>) -> Vec<String> {
     let mut result : Vec<String> = Vec::new();
+    let mut closing: Vec<String> = Vec::new();
     let mut clones = Vec::new();
     let indexed_args : Vec<(usize, String)> = args.iter().cloned().enumerate().collect();
     for (ref i,ref arg) in indexed_args {
@@ -770,87 +782,100 @@ pub fn generate_nested_closures(args: Vec<String>) -> Vec<String> {
         );
         result.push(clones.join(";"));
         clones.push(format!("let {} = {}.clone())", arg, arg));
+        closing.push(String::from("}))"));
     }
     result
 }
 
-pub fn generate_thunk(token: &KlToken) -> String {
+pub fn generate_thunk(token: &KlToken) -> Vec<String> {
     let mut result : Vec<String> = Vec::new();
-    result.push(String::from("KlClosure::Thunk(Rc::new()"));
-    result.push(generate(token));
-    result.join("")
+    result.push(String::from("KlClosure::Thunk(Rc::new("));
+    result.extend(generate(token));
+    result.push(String::from("))"));
+    result
 }
 
-pub fn generate_lambda(token:&KlToken) -> String {
+pub fn generate_lambda(token:&KlToken) -> Vec<String> {
     let mut result : Vec<String> = Vec::new();
     if let &KlToken::Cons(ref klif) = &*token {
         match klif.as_slice() {
-            &[KlToken::Symbol(ref kllambda), ref x, ref body] if kllambda.as_str() == "lambda" => {
-                ()
+            &[KlToken::Symbol(ref kllambda), ref arg, ref body] if kllambda.as_str() == "lambda" => {
+                result.push(String::from("KlClosure::FeedMe( Rc::new( | "));
+                result.extend(generate(arg));
+                result.push(String::from(" | {"));
+                result.extend(generate(body));
+                result.push(String::from("}))"))
             },
             _ => ()
         }
     }
-    result.join("")
+    result
 }
 
-pub fn generate_let(token:&KlToken) -> String {
+pub fn generate_let(token:&KlToken) -> Vec<String> {
     let mut result : Vec<String> = Vec::new();
     if let &KlToken::Cons(ref klif) = &*token {
         match klif.as_slice() {
             &[KlToken::Symbol(ref kllet), ref x, ref y, ref body] if kllet.as_str() == "let" => {
-                let lambda_token = [&KlToken::Symbol(String::from("lambda")), x, body];
-                ()
+                let lambda_token = KlToken::Cons(vec![KlToken::Symbol(String::from("lambda")), x.clone(), body.clone()]);
+                result.push(String::from("("));
+                result.extend(generate_lambda(&lambda_token));
+                result.push(String::from(")"));
+
+                result.push(String::from("("));
+                result.extend(generate(y));
+                result.push(String::from(")"));
             },
             _ => ()
         }
     }
-    result.join("")
+    result
 }
 
-pub fn generate_freeze(token:&KlToken) -> String {
+pub fn generate_freeze(token:&KlToken) -> Vec<String> {
     let mut result : Vec<String> = Vec::new();
     if let &KlToken::Cons(ref klif) = &*token {
         match klif.as_slice() {
             &[KlToken::Symbol(ref klfreeze), ref a] if klfreeze.as_str() == "freeze" => {
-                generate_thunk(a);
+                result = generate_thunk(a);
             },
             _ => ()
         }
     }
-    result.join("")
+    result
 }
 
-pub fn generate_and_or(token:&KlToken) -> String {
+pub fn generate_and_or(token:&KlToken) -> Vec<String> {
     let mut result : Vec<String> = Vec::new();
     if let &KlToken::Cons(ref klif) = &*token {
         match klif.as_slice() {
             &[KlToken::Symbol(ref kland_or), ref a, ref b] if kland_or.as_str() == "and" || kland_or.as_str() == "or" => {
-                generate_thunk(a);
-                generate_thunk(b);
+                result = shen_apply_function(kland_or.clone(), vec![generate_thunk(a).join(""), generate_thunk(b).join("")]);
             },
             _ => ()
         }
     }
-    result.join("")
+    result
 }
 
-pub fn generate_if(token: &KlToken) -> String {
+pub fn generate_if(token: &KlToken) -> Vec<String> {
     let mut result : Vec<String> = Vec::new();
     if let &KlToken::Cons(ref klif) = &*token {
         match klif.as_slice() {
             &[KlToken::Symbol(ref klif), ref predicate, ref if_branch, ref else_branch] if klif.as_str() == "if" => {
-                generate(predicate);
-                generate_thunk(if_branch);
-                generate_thunk(else_branch);
+                result = shen_apply_function(klif.clone(), vec![
+                    generate(predicate).join(""),
+                    generate_thunk(if_branch).join(""),
+                    generate_thunk(else_branch).join("")
+                ]);
             },
             _ => ()
         }
     }
-    result.join("")
+    result
 }
 
-pub fn generate_defun(token: &KlToken) -> String {
+pub fn generate_defun(token: &KlToken) -> Vec<String> {
     let mut result : Vec<String> = Vec::new();
     if let &KlToken::Cons(ref kldefun) = &*token {
         match kldefun.as_slice() {
@@ -861,13 +886,39 @@ pub fn generate_defun(token: &KlToken) -> String {
             _ => ()
         }
     }
-    result.join("")
+    result
 }
 
-pub fn generate(token: &KlToken) -> String {
+pub fn generate_atoms(token: &KlToken) -> Vec<String> {
+    match token {
+        &KlToken::Number(KlNumber::Int(i)) => vec![format!("{}", i)],
+        &KlToken::Number(KlNumber::Float(i)) => vec![format!("{}", i)],
+        &KlToken::String(ref s) => vec![s.clone()],
+        &KlToken::Symbol(ref s) => vec![s.clone()],
+        _ => Vec::new()
+    }
+}
+
+pub fn generate_application(token: &KlToken) -> Vec<String> {
+    let mut result = Vec::new();
+    if let &KlToken::Cons(ref application) = &*token {
+        match application.as_slice() {
+            &[ref f @ KlToken::Symbol(_), ref rest..] => {
+                result = shen_apply_function(
+                    generate(f).join(""),
+                    rest.into_iter().map(| e | generate(e).join("")).collect()
+                )
+            },
+            _ => ()
+        }
+    }
+    result
+}
+
+pub fn generate(token: &KlToken) -> Vec<String> {
     let mut result : Vec<String> = Vec::new();
-    result.push(generate_defun(token));
-    result.join("")
+    result.extend(generate_defun(token));
+    result
 }
 // Generate:1 ends here
 
