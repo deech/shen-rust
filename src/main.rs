@@ -28,7 +28,8 @@ pub enum KlToken {
     Symbol(String),
     Number(KlNumber),
     String(String),
-    Cons(Vec<KlToken>)
+    Cons(Vec<KlToken>),
+    Recur(Vec<KlToken>)
 }
 
 #[derive(Debug, Clone)]
@@ -599,17 +600,41 @@ pub fn get_element_at (path : Vec<usize>, sexp: &KlToken)  -> Option<&KlToken> {
 // Getter:1 ends here
 
 // [[file:../shen-rust.org::*Setter][Setter:1]]
-pub fn set_element_at(path : Vec<usize>, sexp: &mut KlToken, new_token: &KlToken) -> () {
-    let elem = get_element_at(path.clone(), &sexp);
-    match elem {
-        Some(mut e) => {
-            let borrowed = &mut e;
-            *borrowed = new_token;
+pub fn set_element_at(mut path : Vec<usize>, sexp: &mut KlToken, token: KlToken) -> () {
+    match (path.pop(), sexp) {
+        (Some(p), &mut KlToken::Cons(ref mut vec)) => {
+            set_element_at(path, &mut vec[p], token)
         }
-        _ => ()
-    };
+        (None, ref mut val) => {
+            **val = token;
+        }
+        _ => panic!("Gah!")
+    }
 }
 // Setter:1 ends here
+
+// [[file:../shen-rust.org::*Mark%20Recur][Mark\ Recur:1]]
+pub fn mark_recur(mut path: Vec<usize>, sexp: &mut KlToken) -> () {
+    match (path.pop(), sexp) {
+        (Some(p), &mut KlToken::Cons(ref mut vec)) => {
+            mark_recur(path, &mut vec[p])
+        }
+        (None, ref mut val) => {
+            match val.clone() {
+                KlToken::Cons(ref vec) => {
+                    let mut new_vec = vec.clone();
+                    new_vec.reverse();
+                    new_vec.pop();
+                    new_vec.reverse();
+                    **val = KlToken::Recur(new_vec);
+                }
+                _ => panic!("Gah!")
+            }
+        },
+        _ => panic!("Gah!")
+    }
+}
+// Mark\ Recur:1 ends here
 
 // [[file:../shen-rust.org::*Detect%20Possible%20Recursive%20Calls][Detect\ Possible\ Recursive\ Calls:1]]
 pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlToken) -> Vec<Vec<usize>> {
@@ -1102,11 +1127,6 @@ pub fn generate_defun(argument: bool, bound: Vec<String>, token: &KlToken) -> Ve
         match kldefun.as_slice() {
             &[KlToken::Symbol(ref kldefun), KlToken::Symbol(ref name), KlToken::Cons(ref args), ref body] if kldefun.as_str() == shen_rename_symbol(String::from("defun")) => {
                 let new_body = splay_out_defun(name.clone(), args.clone(), body.clone());
-                // let paths = shen_get_all_tail_calls(&splayed_out);
-                // let new_symbol = KlToken::Symbol(String::from("blah"));
-                // for p in paths {
-                //     set_element_at(p, &mut splayed_out, &new_symbol);
-                // }
                 let mut new_bound = bound.clone();
                 new_bound.extend(extract_arg_names(args.clone()));
                 result.push(String::from("{"));
@@ -1125,6 +1145,14 @@ pub fn generate_defun(argument: bool, bound: Vec<String>, token: &KlToken) -> Ve
                 let inner = generate(argument, new_bound.clone(), body);
                 match &*body {
                     &KlToken::Cons(_) => {
+                        let paths = shen_get_all_tail_calls(token);
+                        let mut token = token.clone();
+                        for p in paths {
+                           let mut p = p;
+                           p.reverse();
+                           mark_recur(p.clone(), &mut token);
+                        }
+                        println!("{:?}", token);
                         result.extend(inner.clone());
                     }
                     _ => {
@@ -2404,272 +2432,6 @@ const KLAMBDAFILES: &'static [ &'static str ] = &[
 // [[file:../shen-rust.org::*KLambda%20Files][KLambda\ Files:2]]
 fn main () {
     shen_fill_function_table();
-    {let temp = KlClosure::FeedMe(Rc::new(move |V14888| {let V14888_Copy = (*V14888).clone();KlClosure::FeedMe(Rc::new(move |V14889| {let V14889_Copy = (*V14889).clone();let V14888_Copy = (*V14888).clone();let V14888 = V14888.clone();match shen_apply_arguments_to_function(String::from("cond"), vec![
-Rc::new(KlElement::Cons(vec![
-Rc::new(KlElement::Cons((vec![Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14888_Copy = V14888_Copy.clone();let V14889_Copy = V14889_Copy.clone(); move|| {
-let V14888 = Rc::new(V14888_Copy.clone());
-let V14888_Copy = (*V14888).clone();
-let V14889 = Rc::new(V14889_Copy.clone());
-let V14889_Copy = (*V14889).clone();
-Rc::new(V14889_Copy.clone())
- }})))),Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14888_Copy = V14888_Copy.clone();let V14889_Copy = V14889_Copy.clone(); move|| {
-let V14888 = Rc::new(V14888_Copy.clone());
-let V14888_Copy = (*V14888).clone();
-let V14889 = Rc::new(V14889_Copy.clone());
-let V14889_Copy = (*V14889).clone();
-match shen_apply_arguments_to_function(String::from("__Equal__"), vec![
-Rc::new(KlElement::Cons(vec![])),Rc::new(V14888_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }}))))]))),Rc::new(KlElement::Cons((vec![Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14888_Copy = V14888_Copy.clone();let V14889_Copy = V14889_Copy.clone(); move|| {
-let V14888 = Rc::new(V14888_Copy.clone());
-let V14888_Copy = (*V14888).clone();
-let V14889 = Rc::new(V14889_Copy.clone());
-let V14889_Copy = (*V14889).clone();
-match shen_apply_arguments_to_function(String::from("shen__Dot__length__Dash__h"), vec![
-match shen_apply_arguments_to_function(String::from("tl"), vec![
-Rc::new(V14888_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-},match shen_apply_arguments_to_function(String::from("__Plus__"), vec![
-Rc::new(V14889_Copy.clone()),Rc::new(KlElement::Number(KlNumber::Int(1)))
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }})))),Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14888_Copy = V14888_Copy.clone();let V14889_Copy = V14889_Copy.clone(); move|| {
-let V14888 = Rc::new(V14888_Copy.clone());
-let V14888_Copy = (*V14888).clone();
-let V14889 = Rc::new(V14889_Copy.clone());
-let V14889_Copy = (*V14889).clone();
-Rc::new(KlElement::Symbol(String::from("shen_true")))
- }}))))])))
-]))
-]) {Ok(c) => c.clone(),
- Err(s) => KlClosure::Done(shen_make_error(s.clone().as_str()))}}))
-}));add_to_function_table(String::from("shen__Dot__length__Dash__h"), temp.clone())}
-{let temp = KlClosure::FeedMe(Rc::new(move |V14838| {let V14838_Copy = (*V14838).clone();match shen_apply_arguments_to_function(String::from("shen__Dot__reverse_help"), vec![
-Rc::new(V14838_Copy.clone()),Rc::new(KlElement::Cons(vec![]))
-]) {Ok(c) => c.clone(),
- Err(s) => KlClosure::Done(shen_make_error(s.clone().as_str()))}}));add_to_function_table(String::from("reverse"), temp.clone())}
-{let temp = KlClosure::FeedMe(Rc::new(move |V14841| {let V14841_Copy = (*V14841).clone();KlClosure::FeedMe(Rc::new(move |V14842| {let V14842_Copy = (*V14842).clone();let V14841_Copy = (*V14841).clone();let V14841 = V14841.clone();match shen_apply_arguments_to_function(String::from("cond"), vec![
-Rc::new(KlElement::Cons(vec![
-Rc::new(KlElement::Cons((vec![Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14841_Copy = V14841_Copy.clone();let V14842_Copy = V14842_Copy.clone(); move|| {
-let V14841 = Rc::new(V14841_Copy.clone());
-let V14841_Copy = (*V14841).clone();
-let V14842 = Rc::new(V14842_Copy.clone());
-let V14842_Copy = (*V14842).clone();
-Rc::new(V14842_Copy.clone())
- }})))),Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14841_Copy = V14841_Copy.clone();let V14842_Copy = V14842_Copy.clone(); move|| {
-let V14841 = Rc::new(V14841_Copy.clone());
-let V14841_Copy = (*V14841).clone();
-let V14842 = Rc::new(V14842_Copy.clone());
-let V14842_Copy = (*V14842).clone();
-match shen_apply_arguments_to_function(String::from("__Equal__"), vec![
-Rc::new(KlElement::Cons(vec![])),Rc::new(V14841_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }}))))]))),Rc::new(KlElement::Cons((vec![Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14841_Copy = V14841_Copy.clone();let V14842_Copy = V14842_Copy.clone(); move|| {
-let V14841 = Rc::new(V14841_Copy.clone());
-let V14841_Copy = (*V14841).clone();
-let V14842 = Rc::new(V14842_Copy.clone());
-let V14842_Copy = (*V14842).clone();
-match shen_apply_arguments_to_function(String::from("shen__Dot__reverse_help"), vec![
-match shen_apply_arguments_to_function(String::from("tl"), vec![
-Rc::new(V14841_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-},match shen_apply_arguments_to_function(String::from("cons"), vec![
-match shen_apply_arguments_to_function(String::from("hd"), vec![
-Rc::new(V14841_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-},Rc::new(V14842_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }})))),Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14841_Copy = V14841_Copy.clone();let V14842_Copy = V14842_Copy.clone(); move|| {
-let V14841 = Rc::new(V14841_Copy.clone());
-let V14841_Copy = (*V14841).clone();
-let V14842 = Rc::new(V14842_Copy.clone());
-let V14842_Copy = (*V14842).clone();
-match shen_apply_arguments_to_function(String::from("cons__Question__"), vec![
-Rc::new(V14841_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }}))))]))),Rc::new(KlElement::Cons((vec![Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14841_Copy = V14841_Copy.clone();let V14842_Copy = V14842_Copy.clone(); move|| {
-let V14841 = Rc::new(V14841_Copy.clone());
-let V14841_Copy = (*V14841).clone();
-let V14842 = Rc::new(V14842_Copy.clone());
-let V14842_Copy = (*V14842).clone();
-match shen_apply_arguments_to_function(String::from("simple__Dash__error"), vec![
-Rc::new(KlElement::String(String::from("Aborted")))
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }})))),Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14841_Copy = V14841_Copy.clone();let V14842_Copy = V14842_Copy.clone(); move|| {
-let V14841 = Rc::new(V14841_Copy.clone());
-let V14841_Copy = (*V14841).clone();
-let V14842 = Rc::new(V14842_Copy.clone());
-let V14842_Copy = (*V14842).clone();
-Rc::new(KlElement::Symbol(String::from("shen_true")))
- }}))))])))
-]))
-]) {Ok(c) => c.clone(),
- Err(s) => KlClosure::Done(shen_make_error(s.clone().as_str()))}}))
-}));add_to_function_table(String::from("shen__Dot__reverse_help"), temp.clone())}
-{let temp = KlClosure::FeedMe(Rc::new(move |V14881| {let V14881_Copy = (*V14881).clone();KlClosure::FeedMe(Rc::new(move |V14882| {let V14882_Copy = (*V14882).clone();let V14881_Copy = (*V14881).clone();let V14881 = V14881.clone();KlClosure::FeedMe(Rc::new(move |V14883| {let V14883_Copy = (*V14883).clone();let V14881_Copy = (*V14881).clone();let V14881 = V14881.clone();let V14882_Copy = (*V14882).clone();let V14882 = V14882.clone();match shen_apply_arguments_to_function(String::from("cond"), vec![
-Rc::new(KlElement::Cons(vec![
-Rc::new(KlElement::Cons((vec![Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14881_Copy = V14881_Copy.clone();let V14882_Copy = V14882_Copy.clone();let V14883_Copy = V14883_Copy.clone(); move|| {
-let V14881 = Rc::new(V14881_Copy.clone());
-let V14881_Copy = (*V14881).clone();
-let V14882 = Rc::new(V14882_Copy.clone());
-let V14882_Copy = (*V14882).clone();
-let V14883 = Rc::new(V14883_Copy.clone());
-let V14883_Copy = (*V14883).clone();
-match shen_apply_arguments_to_function(String::from("reverse"), vec![
-Rc::new(V14883_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }})))),Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14881_Copy = V14881_Copy.clone();let V14882_Copy = V14882_Copy.clone();let V14883_Copy = V14883_Copy.clone(); move|| {
-let V14881 = Rc::new(V14881_Copy.clone());
-let V14881_Copy = (*V14881).clone();
-let V14882 = Rc::new(V14882_Copy.clone());
-let V14882_Copy = (*V14882).clone();
-let V14883 = Rc::new(V14883_Copy.clone());
-let V14883_Copy = (*V14883).clone();
-match shen_apply_arguments_to_function(String::from("__Equal__"), vec![
-Rc::new(KlElement::Cons(vec![])),Rc::new(V14882_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }}))))]))),Rc::new(KlElement::Cons((vec![Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14881_Copy = V14881_Copy.clone();let V14882_Copy = V14882_Copy.clone();let V14883_Copy = V14883_Copy.clone(); move|| {
-let V14881 = Rc::new(V14881_Copy.clone());
-let V14881_Copy = (*V14881).clone();
-let V14882 = Rc::new(V14882_Copy.clone());
-let V14882_Copy = (*V14882).clone();
-let V14883 = Rc::new(V14883_Copy.clone());
-let V14883_Copy = (*V14883).clone();
-match shen_apply_arguments_to_function(String::from("shen__Dot__map__Dash__h"), vec![
-Rc::new(V14881_Copy.clone()),match shen_apply_arguments_to_function(String::from("tl"), vec![
-Rc::new(V14882_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-},match shen_apply_arguments_to_function(String::from("cons"), vec![
-match shen_apply_element(Rc::new(V14881_Copy.clone()), vec![
-match shen_apply_arguments_to_function(String::from("hd"), vec![
-Rc::new(V14882_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-},Rc::new(V14883_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }})))),Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14881_Copy = V14881_Copy.clone();let V14882_Copy = V14882_Copy.clone();let V14883_Copy = V14883_Copy.clone(); move|| {
-let V14881 = Rc::new(V14881_Copy.clone());
-let V14881_Copy = (*V14881).clone();
-let V14882 = Rc::new(V14882_Copy.clone());
-let V14882_Copy = (*V14882).clone();
-let V14883 = Rc::new(V14883_Copy.clone());
-let V14883_Copy = (*V14883).clone();
-match shen_apply_arguments_to_function(String::from("cons__Question__"), vec![
-Rc::new(V14882_Copy.clone())
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }}))))]))),Rc::new(KlElement::Cons((vec![Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14881_Copy = V14881_Copy.clone();let V14882_Copy = V14882_Copy.clone();let V14883_Copy = V14883_Copy.clone(); move|| {
-let V14881 = Rc::new(V14881_Copy.clone());
-let V14881_Copy = (*V14881).clone();
-let V14882 = Rc::new(V14882_Copy.clone());
-let V14882_Copy = (*V14882).clone();
-let V14883 = Rc::new(V14883_Copy.clone());
-let V14883_Copy = (*V14883).clone();
-match shen_apply_arguments_to_function(String::from("simple__Dash__error"), vec![
-Rc::new(KlElement::String(String::from("Aborted")))
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
- }})))),Rc::new(KlElement::Closure(KlClosure::Thunk(Rc::new( { let V14881_Copy = V14881_Copy.clone();let V14882_Copy = V14882_Copy.clone();let V14883_Copy = V14883_Copy.clone(); move|| {
-let V14881 = Rc::new(V14881_Copy.clone());
-let V14881_Copy = (*V14881).clone();
-let V14882 = Rc::new(V14882_Copy.clone());
-let V14882_Copy = (*V14882).clone();
-let V14883 = Rc::new(V14883_Copy.clone());
-let V14883_Copy = (*V14883).clone();
-Rc::new(KlElement::Symbol(String::from("shen_true")))
- }}))))])))
-]))
-]) {Ok(c) => c.clone(),
- Err(s) => KlClosure::Done(shen_make_error(s.clone().as_str()))}}))
-}))
-}));add_to_function_table(String::from("shen__Dot__map__Dash__h"), temp.clone())};
-
-let result = match shen_apply_arguments_to_function(String::from("shen__Dot__map__Dash__h"), vec![
-Rc::new(KlElement::Closure(
-
-KlClosure::FeedMe(Rc::new(move |X| {
-let X_Copy = (*X).clone();
-match shen_apply_arguments_to_function(String::from("__Plus__"), vec![
-Rc::new(KlElement::Number(KlNumber::Int(1))),Rc::new(X_Copy.clone())
-]) {
-Ok(c) => c.clone(),
- Err(s) => KlClosure::Done(shen_make_error(s.clone().as_str()))
-}
-}))
-)),match shen_apply_arguments_to_function(String::from("cons"), vec![
-Rc::new(KlElement::Number(KlNumber::Int(1))),match shen_apply_arguments_to_function(String::from("cons"), vec![
-Rc::new(KlElement::Number(KlNumber::Int(2))),match shen_apply_arguments_to_function(String::from("cons"), vec![
-Rc::new(KlElement::Number(KlNumber::Int(3))),Rc::new(KlElement::Cons(vec![]))
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-}
-]) {
-Ok(c) => shen_closure_to_element(c.clone()),
- Err(s) => Rc::new(KlElement::Closure(KlClosure::Done(shen_make_error(s.clone().as_str()))))
-},Rc::new(KlElement::Cons(vec![]))
-]) {Ok(c) => c.clone(),
-    Err(s) => KlClosure::Done(shen_make_error(s.clone().as_str()))};
-    println!("{:?}", result);
     let with_klambda_path : Vec<String> = KLAMBDAFILES
         .into_iter()
         .map(|f| {"KLambda/".to_string() + f})

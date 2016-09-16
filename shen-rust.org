@@ -57,7 +57,8 @@
       Symbol(String),
       Number(KlNumber),
       String(String),
-      Cons(Vec<KlToken>)
+      Cons(Vec<KlToken>),
+      Recur(Vec<KlToken>)
   }
 
   #[derive(Debug, Clone)]
@@ -636,18 +637,41 @@
 #+END_SRC
 ** Setter
 #+BEGIN_SRC rust :tangle src/main.rs
-  pub fn set_element_at(path : Vec<usize>, sexp: &mut KlToken, new_token: &KlToken) -> () {
-      let elem = get_element_at(path.clone(), &sexp);
-      match elem {
-          Some(mut e) => {
-              let borrowed = &mut e;
-              *borrowed = new_token;
+  pub fn set_element_at(mut path : Vec<usize>, sexp: &mut KlToken, token: KlToken) -> () {
+      match (path.pop(), sexp) {
+          (Some(p), &mut KlToken::Cons(ref mut vec)) => {
+              set_element_at(path, &mut vec[p], token)
           }
-          _ => ()
-      };
+          (None, ref mut val) => {
+              **val = token;
+          }
+          _ => panic!("Gah!")
+      }
   }
 #+END_SRC
-
+** Mark Recur
+#+BEGIN_SRC rust :tangle src/main.rs
+  pub fn mark_recur(mut path: Vec<usize>, sexp: &mut KlToken) -> () {
+      match (path.pop(), sexp) {
+          (Some(p), &mut KlToken::Cons(ref mut vec)) => {
+              mark_recur(path, &mut vec[p])
+          }
+          (None, ref mut val) => {
+              match val.clone() {
+                  KlToken::Cons(ref vec) => {
+                      let mut new_vec = vec.clone();
+                      new_vec.reverse();
+                      new_vec.pop();
+                      new_vec.reverse();
+                      **val = KlToken::Recur(new_vec);
+                  }
+                  _ => panic!("Gah!")
+              }
+          },
+          _ => panic!("Gah!")
+      }
+  }
+#+END_SRC
 ** Detect Possible Recursive Calls
 #+BEGIN_SRC rust :tangle src/main.rs
   pub fn find_recursive_calls (function_name: String, num_args: usize, sexp: &KlToken) -> Vec<Vec<usize>> {
@@ -1107,7 +1131,7 @@
       result
   }
 #+END_SRC
-*** Defun
+*** TODO Defun
 #+BEGIN_SRC rust :tangle src/main.rs
   pub fn add_to_function_table(name: String, c : KlClosure) {
       FUNCTION_TABLE.with(| function_table | {
@@ -1142,11 +1166,6 @@
           match kldefun.as_slice() {
               &[KlToken::Symbol(ref kldefun), KlToken::Symbol(ref name), KlToken::Cons(ref args), ref body] if kldefun.as_str() == shen_rename_symbol(String::from("defun")) => {
                   let new_body = splay_out_defun(name.clone(), args.clone(), body.clone());
-                  // let paths = shen_get_all_tail_calls(&splayed_out);
-                  // let new_symbol = KlToken::Symbol(String::from("blah"));
-                  // for p in paths {
-                  //     set_element_at(p, &mut splayed_out, &new_symbol);
-                  // }
                   let mut new_bound = bound.clone();
                   new_bound.extend(extract_arg_names(args.clone()));
                   result.push(String::from("{"));
@@ -1165,6 +1184,13 @@
                   let inner = generate(argument, new_bound.clone(), body);
                   match &*body {
                       &KlToken::Cons(_) => {
+                          let paths = shen_get_all_tail_calls(token);
+                          let mut token = token.clone();
+                          for p in paths {
+                             let mut p = p;
+                             p.reverse();
+                             mark_recur(p.clone(), &mut token);
+                          }
                           result.extend(inner.clone());
                       }
                       _ => {
