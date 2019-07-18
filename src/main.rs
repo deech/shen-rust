@@ -1,6 +1,5 @@
 // [[file:../shen-rust.org::*Preamble][Preamble:1]]
 #![feature(slice_patterns)]
-#![feature(custom_derive)]
 #![feature(try_from)]
 #[macro_use]
 extern crate nom;
