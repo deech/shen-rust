@@ -564,9 +564,9 @@ fn collect_sexps(kl: &[u8], kl_buffer: &mut Vec<Vec<KlToken>>) -> () {
     };
     // remove toplevel strings
     parsed.retain(|expr| match expr { &KlToken::Cons(_) => true, _ => false });
-    for p in parsed.as_slice() {
-        println!("{}", intersperse(generate(false, vec![], p), String::from("")));
-    }
+    // for p in parsed.as_slice() {
+    //     println!("{}", intersperse(generate(false, vec![], p), String::from("")));
+    // }
     kl_buffer.push(parsed)
 }
 // Collect:1 ends here
@@ -1152,7 +1152,7 @@ pub fn generate_defun(argument: bool, bound: Vec<String>, token: &KlToken) -> Ve
                             p.reverse();
                             mark_recur(p.clone(), &mut token);
                         }
-                        println!("{:?}", token);
+                        // println!("{:?}", token);
                         if paths.len() > 0 {
                             if let &KlToken::Cons(ref marked_defun) = &token {
                                 if let &[_,_,_,ref body] = marked_defun.as_slice() {
@@ -1262,7 +1262,7 @@ pub fn generate_application(argument: bool, bound: Vec<String>, token: &KlToken)
             }
         },
         &KlToken::Recur(ref args) => {
-            println!("{:?}", args);
+            // println!("{:?}", args);
             let arg_tuple : Vec<String> = args.into_iter().map(| e | intersperse(generate(true, bound.clone(), e),String::from("\n"))).collect();
             let mut args = Vec::new();
             args.push(String::from("Rc::new(KlElement::Recur(vec!["));
