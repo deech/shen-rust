@@ -28,7 +28,6 @@
 * Preamble
 #+BEGIN_SRC rust :tangle src/main.rs
   #![feature(slice_patterns)]
-  #![feature(custom_derive)]
   #![feature(try_from)]
   #[macro_use]
   extern crate nom;
