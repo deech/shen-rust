@@ -1,6 +1,6 @@
 #+TITLE: Shen Rust
 #+AUTHOR: Aditya Siram
-#+PROPERTY: comments noweb
+#+PROPERTY: header-args :comments noweb
 #+OPTIONS: ^:nil ;; let an underscore be an underscore, disable sub-superscripting
 #+OPTIONS: timestamp:nil
 
