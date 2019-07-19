@@ -2474,14 +2474,11 @@ pub fn shen_fill_function_table() {
 // Filling\ The\ Function\ Table:1 ends here
 
 // [[file:../shen-rust.org::*KLambda%20Files][KLambda\ Files:1]]
-// const KLAMBDAFILES: &'static [ &'static str ] = &[
-//     "toplevel.kl", "core.kl", "sys.kl", "sequent.kl", "yacc.kl",
-//     "reader.kl", "prolog.kl", "track.kl", "load.kl", "writer.kl",
-//     "macros.kl", "declarations.kl", "types.kl", "t-star.kl"
-// ];
 
 const KLAMBDAFILES: &'static [ &'static str ] = &[
-    "test.kl"
+    "toplevel.kl", "core.kl", "sys.kl", "sequent.kl", "yacc.kl",
+    "reader.kl", "prolog.kl", "track.kl", "load.kl", "writer.kl",
+    "macros.kl", "declarations.kl", "types.kl", "t-star.kl"
 ];
 // KLambda\ Files:1 ends here
 
